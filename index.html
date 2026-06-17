@@ -7,7 +7,7 @@
     <!-- Google Fonts: Outfit (English UI) & Noto Sans KR (Korean Text) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Custom CSS Styling -->
@@ -17,15 +17,9 @@
 </head>
 <body class="light-mode">
     <div class="app-container">
-        <!-- Header Section -->
+        <!-- Header Banner (Navy theme matching Python title block) -->
         <header class="app-header">
-            <div class="header-logo">
-                <i class="fa-solid fa-building-shield logo-icon"></i>
-                <div class="header-titles">
-                    <h1>공공기관 소관부서 및 사무분장 법령 통합 검증 엔진</h1>
-                    <p class="header-subtitle">Public Institution Department & Office Distribution Integrated Search Engine</p>
-                </div>
-            </div>
+            <h1 class="header-title">공공기관 소관부서 및 사무분장 법령 통합 검증 엔진</h1>
             <div class="header-controls">
                 <button id="themeToggleBtn" class="theme-toggle-btn" title="테마 변경">
                     <i class="fa-solid fa-moon"></i>
@@ -33,190 +27,163 @@
             </div>
         </header>
 
-        <!-- Main Workspace Layout -->
-        <main class="app-main">
-            <!-- Sidebar: Control Panel -->
-            <aside class="app-sidebar">
-                <div class="sidebar-card">
-                    <h2 class="sidebar-title"><i class="fa-solid fa-sliders"></i> 검색 설정</h2>
-                    
-                    <!-- Radio Groups: Central vs Local -->
-                    <div class="control-group">
-                        <label class="control-label">기관 유형</label>
-                        <div class="radio-tile-group">
-                            <label class="radio-tile-label">
-                                <input type="radio" name="govtType" value="central" id="radioCentral">
-                                <div class="radio-tile">
-                                    <i class="fa-solid fa-landmark"></i>
-                                    <span>중앙부처</span>
-                                </div>
-                            </label>
-                            <label class="radio-tile-label">
-                                <input type="radio" name="govtType" value="local" id="radioLocal" checked>
-                                <div class="radio-tile">
-                                    <i class="fa-solid fa-map-location-dot"></i>
-                                    <span>지방자치단체</span>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
+        <!-- Top Horizontal Control Panel -->
+        <section class="top-control-panel">
+            <!-- Row 1: Radio Buttons -->
+            <div class="control-row">
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="govtType" value="central" id="radioCentral">
+                        <span class="radio-custom"></span>
+                        <span class="lbl-text">중앙행정기관(부처)</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="govtType" value="local" id="radioLocal" checked>
+                        <span class="radio-custom"></span>
+                        <span class="lbl-text">지방자치단체</span>
+                    </label>
+                </div>
+            </div>
 
-                    <!-- Dropdowns -->
-                    <div class="control-group">
-                        <label for="selectMain" class="control-label">기관/시도 선택</label>
-                        <div class="custom-select-wrapper">
-                            <select id="selectMain" class="form-select">
-                                <!-- Dynamic Options -->
-                            </select>
-                            <i class="fa-solid fa-chevron-down select-arrow"></i>
-                        </div>
-                    </div>
-
-                    <div class="control-group" id="groupSub">
-                        <label for="selectSub" class="control-label">상세 분류</label>
-                        <div class="custom-select-wrapper">
-                            <select id="selectSub" class="form-select">
-                                <!-- Dynamic Options -->
-                            </select>
-                            <i class="fa-solid fa-chevron-down select-arrow"></i>
-                        </div>
-                    </div>
-
-                    <!-- Keyword Entry -->
-                    <div class="control-group">
-                        <label for="inputKeyword" class="control-label">사무 검색어</label>
-                        <div class="input-icon-wrapper">
-                            <i class="fa-solid fa-magnifying-glass input-icon"></i>
-                            <input type="text" id="inputKeyword" class="form-input" placeholder="예: 자동차민원, 경제진흥원" required autocomplete="off">
-                        </div>
-                    </div>
-
-                    <!-- Action Buttons -->
-                    <div class="action-buttons-group">
-                        <button id="btnSearchOrdin" class="btn btn-primary btn-block">
-                            <i class="fa-solid fa-crosshairs"></i> 분장사무 정밀 추적
-                        </button>
-                        <button id="btnSearchJeongyeol" class="btn btn-secondary btn-block">
-                            <i class="fa-solid fa-signature"></i> 사무전결 정밀 추적
-                        </button>
-                        <button id="btnStop" class="btn btn-danger btn-block" disabled>
-                            <i class="fa-solid fa-stop"></i> 중단
-                        </button>
+            <!-- Row 2: Selectors -->
+            <div class="control-row selectors-row">
+                <div class="selector-field">
+                    <label for="selectMain" class="field-label">기관/시도 선택:</label>
+                    <div class="select-wrapper">
+                        <select id="selectMain" class="form-select">
+                            <!-- Dynamic Options -->
+                        </select>
+                        <i class="fa-solid fa-chevron-down select-arrow"></i>
                     </div>
                 </div>
-                
-                <!-- System Status / Information Card -->
-                <div class="sidebar-card info-card">
-                    <h3 class="info-card-title"><i class="fa-solid fa-circle-info"></i> 도움말 및 정보</h3>
-                    <ul class="info-list">
-                        <li>본 엔진은 국가법령정보 API를 활용하여 소관 부서와 분장사무를 초정밀 역추적합니다.</li>
-                        <li>CORS 차단을 방지하기 위해 로테이션 프록시 서버를 경유합니다.</li>
-                        <li>조직 조례/시행규칙 내부의 첨부 별표 및 서식(HTML 변환 데이터)까지 정밀 파싱합니다.</li>
-                    </ul>
-                </div>
-            </aside>
 
-            <!-- Main Panel: Output and Reports -->
-            <section class="app-content">
-                <!-- Navigation Tabs -->
-                <div class="content-tabs-header">
-                    <button id="tabBtnLogs" class="tab-btn active" data-tab="tabLogs">
-                        <i class="fa-solid fa-terminal"></i> 실시간 추적 로그
+                <div class="selector-field" id="groupSub">
+                    <label for="selectSub" class="field-label">상세 분류:</label>
+                    <div class="select-wrapper">
+                        <select id="selectSub" class="form-select">
+                            <!-- Dynamic Options -->
+                        </select>
+                        <i class="fa-solid fa-chevron-down select-arrow"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 3: Keyword & Buttons -->
+            <div class="control-row actions-row">
+                <div class="keyword-field">
+                    <label for="inputKeyword" class="field-label">사무 검색어:</label>
+                    <input type="text" id="inputKeyword" class="form-input" placeholder="예: 정보공개, 자동차민원" required autocomplete="off">
+                </div>
+
+                <div class="buttons-field">
+                    <button id="btnSearchOrdin" class="btn btn-primary">
+                        <i class="fa-solid fa-magnifying-glass"></i> 분장사무 정밀 추적
                     </button>
-                    <button id="tabBtnReport" class="tab-btn" data-tab="tabReport">
-                        <i class="fa-solid fa-chart-line"></i> 최종 분석 보고서
+                    <button id="btnSearchJeongyeol" class="btn btn-secondary">
+                        <i class="fa-solid fa-signature"></i> 사무전결 정밀 추적
+                    </button>
+                    <button id="btnStop" class="btn btn-danger" disabled>
+                        중단
                     </button>
                 </div>
+            </div>
+        </section>
 
-                <!-- Tabs Container -->
-                <div class="tabs-content-container">
-                    <!-- Tab 1: Terminal Log Window -->
-                    <div id="tabLogs" class="tab-pane active">
-                        <div class="terminal-container">
-                            <div class="terminal-header">
-                                <div class="terminal-dots">
-                                    <span class="dot red"></span>
-                                    <span class="dot yellow"></span>
-                                    <span class="dot green"></span>
-                                </div>
-                                <span class="terminal-title">Trace Log Terminal</span>
-                                <button id="btnClearLog" class="terminal-clear-btn" title="로그 지우기">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
-                            </div>
-                            <div id="logOutput" class="terminal-body">
-                                <div class="terminal-welcome">
-                                    <i class="fa-solid fa-wave-square wave-animation"></i>
-                                    <h3>데이터 대기 중...</h3>
-                                    <p>사무 검색어를 입력하고 정밀 추적을 시작해 주세요.</p>
-                                </div>
-                            </div>
+        <!-- Main Display Content Area (Spacious & Bottom-aligned) -->
+        <main class="app-main-content">
+            <!-- Tabs Switcher -->
+            <div class="tabs-nav">
+                <button id="tabBtnLogs" class="tab-btn active" data-tab="tabLogs">
+                    <i class="fa-solid fa-list-check"></i> 실시간 추적 로그
+                </button>
+                <button id="tabBtnReport" class="tab-btn" data-tab="tabReport">
+                    <i class="fa-solid fa-file-invoice"></i> 최종 분석 보고서
+                </button>
+            </div>
+
+            <!-- Tab Contents Container -->
+            <div class="tabs-body-container">
+                <!-- Tab 1: Clean Light-themed Log Area -->
+                <div id="tabLogs" class="tab-pane active">
+                    <div class="log-view-panel">
+                        <div class="log-header">
+                            <span class="log-title"><i class="fa-solid fa-circle-nodes"></i> 실시간 분석 및 탐색 과정</span>
+                            <button id="btnClearLog" class="clear-log-btn" title="로그 지우기">
+                                <i class="fa-solid fa-trash-can"></i> 지우기
+                            </button>
                         </div>
-                    </div>
-
-                    <!-- Tab 2: Detailed Match Report View -->
-                    <div id="tabReport" class="tab-pane">
-                        <div class="report-container">
-                            <!-- Summary Counters -->
-                            <div class="report-summary-cards" id="reportSummaryCards" style="display: none;">
-                                <div class="summary-card">
-                                    <div class="summary-card-icon bg-blue"><i class="fa-solid fa-building"></i></div>
-                                    <div class="summary-card-data">
-                                        <span class="summary-value" id="countOrgs">0</span>
-                                        <span class="summary-label">매칭 기관 수</span>
-                                    </div>
-                                </div>
-                                <div class="summary-card">
-                                    <div class="summary-card-icon bg-green"><i class="fa-solid fa-file-invoice"></i></div>
-                                    <div class="summary-card-data">
-                                        <span class="summary-value" id="countLaws">0</span>
-                                        <span class="summary-label">매칭 법규 수</span>
-                                    </div>
-                                </div>
-                                <div class="summary-card">
-                                    <div class="summary-card-icon bg-red"><i class="fa-solid fa-list-check"></i></div>
-                                    <div class="summary-card-data">
-                                        <span class="summary-value" id="countCases">0</span>
-                                        <span class="summary-label">검색된 소관 사무 건수</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Dynamic Report Body -->
-                            <div id="reportOutput" class="report-body-content">
-                                <div class="report-empty-state">
-                                    <i class="fa-solid fa-file-circle-question"></i>
-                                    <h3>생성된 보고서가 없습니다</h3>
-                                    <p>검색이 성공적으로 완료되면 정밀 분석 보고서가 자동으로 구성됩니다.</p>
-                                </div>
+                        <div id="logOutput" class="log-body-text">
+                            <div class="empty-welcome">
+                                <i class="fa-solid fa-arrow-pointer wave-animation"></i>
+                                <h3>데이터 대기 중...</h3>
+                                <p>사무 검색어를 입력하고 정밀 추적을 시작해 주세요.</p>
                             </div>
                         </div>
                     </div>
                 </div>
-            </section>
+
+                <!-- Tab 2: Match Report Panel -->
+                <div id="tabReport" class="tab-pane">
+                    <div class="report-view-panel">
+                        <!-- Counters summary -->
+                        <div class="report-summary-indicators" id="reportSummaryCards" style="display: none;">
+                            <div class="indicator-card card-blue">
+                                <i class="fa-solid fa-building indicator-icon"></i>
+                                <div class="indicator-info">
+                                    <span class="indicator-val" id="countOrgs">0</span>
+                                    <span class="indicator-lbl">매칭 기관</span>
+                                </div>
+                            </div>
+                            <div class="indicator-card card-green">
+                                <i class="fa-solid fa-file-contract indicator-icon"></i>
+                                <div class="indicator-info">
+                                    <span class="indicator-val" id="countLaws">0</span>
+                                    <span class="indicator-lbl">근거 법규</span>
+                                </div>
+                            </div>
+                            <div class="indicator-card card-red">
+                                <i class="fa-solid fa-clipboard-list indicator-icon"></i>
+                                <div class="indicator-info">
+                                    <span class="indicator-val" id="countCases">0</span>
+                                    <span class="indicator-lbl">소관 사무 건수</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Scraped matches body -->
+                        <div id="reportOutput" class="report-body-text">
+                            <div class="report-empty-welcome">
+                                <i class="fa-solid fa-folder-open"></i>
+                                <h3>분석 완료된 보고서가 없습니다</h3>
+                                <p>검색이 성공적으로 종료되면 정밀 요약 보고서가 자동으로 구성됩니다.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
-        <!-- Bottom Panel: Results Searching & Downloader -->
+        <!-- Footer Control Area -->
         <footer class="app-footer">
-            <div class="footer-search-group">
-                <label for="inputResultSearch" class="footer-label">결과 내 검색:</label>
-                <div class="footer-search-input-wrapper">
-                    <input type="text" id="inputResultSearch" class="footer-search-input" placeholder="로그/보고서 내 단어 입력" disabled>
-                    <button id="btnPrevMatch" class="footer-nav-btn" title="이전 매칭" disabled><i class="fa-solid fa-chevron-up"></i></button>
-                    <button id="btnNextMatch" class="footer-nav-btn" title="다음 매칭" disabled><i class="fa-solid fa-chevron-down"></i></button>
+            <div class="footer-search-bar">
+                <span class="search-lbl">결과 내 검색:</span>
+                <div class="search-input-box">
+                    <input type="text" id="inputResultSearch" class="search-input-field" placeholder="검색어 입력" disabled>
+                    <button id="btnPrevMatch" class="search-nav-btn" disabled>이전</button>
+                    <button id="btnNextMatch" class="search-nav-btn" disabled>다음</button>
                 </div>
-                <span id="labelSearchStatus" class="search-status-label">0 / 0</span>
+                <span id="labelSearchStatus" class="search-status-counter">0/0</span>
             </div>
-            
-            <div class="footer-actions">
+
+            <div class="footer-download-btn-wrapper">
                 <button id="btnDownloadExcel" class="btn btn-success" disabled>
-                    <i class="fa-solid fa-file-excel"></i> 엑셀 다운로드
+                    엑셀 다운로드
                 </button>
             </div>
         </footer>
     </div>
-    
-    <!-- Custom Application Javascript -->
+
+    <!-- Application Script -->
     <script src="app.js"></script>
 </body>
 </html>

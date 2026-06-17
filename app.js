@@ -49,6 +49,7 @@ const EXCLUDE_DEPT_WORDS = new Set([
     "신청서", "확인원", "등록확인원", "계획서", "동의서", "의견서", "보고서", "명세서", "계약서", "납부서", "확인서", "증명서"
 ]);
 
+// 위원회를 부서 유형 패턴에 명시적으로 추가
 const DEPT_PATTERN = /^[가-힣a-zA-Z\s\u2027·]+(?:과|담당관|관|대변인|단|실|국|본부|위원회|처|센터|원|소)$/;
 
 // UI Elements
@@ -115,16 +116,14 @@ tabButtons.forEach(btn => {
 // Dropdowns Updates
 function initDropdowns() {
     if (radioCentral.checked) {
-        // Central Govt layout
         populateSelect(selectMain, ["전체 중앙행정기관", ...CENTRAL_GOVS]);
         selectMain.value = "전체 중앙행정기관";
         groupSub.style.display = "none";
         selectSub.disabled = true;
     } else {
-        // Local Govt layout
         populateSelect(selectMain, ["전국 광역단체 전체", ...Object.keys(REGION_MAP)]);
         selectMain.value = "부산광역시";
-        groupSub.style.display = "block";
+        groupSub.style.display = "flex";
         selectSub.disabled = false;
         updateSubDropdown("부산광역시");
     }
@@ -164,10 +163,10 @@ selectMain.addEventListener("change", (e) => {
 // Clear Log
 btnClearLog.addEventListener("click", () => {
     logOutput.innerHTML = `
-        <div class="terminal-welcome">
-            <i class="fa-solid fa-wave-square wave-animation"></i>
-            <h3>터미널 비워짐</h3>
-            <p>새로운 스캔 작업을 시작하여 로그를 남겨 주세요.</p>
+        <div class="empty-welcome">
+            <i class="fa-solid fa-arrow-pointer wave-animation"></i>
+            <h3>데이터 대기 중...</h3>
+            <p>사무 검색어를 입력하고 정밀 추적을 시작해 주세요.</p>
         </div>
     `;
     resetResultSearch();
@@ -192,11 +191,9 @@ async function fetchViaProxy(url, signal) {
         }
         const proxyUrl = PROXY_TEMPLATES[i](url);
         try {
-            // Give each request a 12 second timeout
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 12000);
             
-            // Link to parent signal if available
             let linkedSignal = controller.signal;
             if (signal) {
                 signal.addEventListener("abort", () => controller.abort());
@@ -210,14 +207,11 @@ async function fetchViaProxy(url, signal) {
             }
             const arrayBuffer = await response.arrayBuffer();
             
-            // Decode with EUC-KR / CP949 fallbacks
             let decoder = new TextDecoder("utf-8");
             let text = decoder.decode(arrayBuffer);
             
-            // Check if Korean characters look distorted
             const korMatches = text.match(/[가-힣]/g);
             if (!korMatches || korMatches.length < 3) {
-                // Try EUC-KR
                 decoder = new TextDecoder("euc-kr");
                 text = decoder.decode(arrayBuffer);
             }
@@ -230,15 +224,14 @@ async function fetchViaProxy(url, signal) {
     throw new Error(`모든 CORS 프록시 서버 호출에 실패했습니다. (최종 에러: ${lastError?.message})`);
 }
 
-// Logging functions (renders to Terminal Output)
+// Logging functions (renders to clean Light Logs Panel)
 function writeLog(text, tag = "normal") {
-    if (logOutput.querySelector(".terminal-welcome")) {
+    if (logOutput.querySelector(".empty-welcome")) {
         logOutput.innerHTML = "";
     }
     const line = document.createElement("div");
     line.className = "log-line";
     
-    // Highlight query keywords if match
     const keyword = inputKeyword.value.trim();
     if (keyword && text.includes(keyword)) {
         const parts = text.split(keyword);
@@ -268,7 +261,7 @@ function writeLog(text, tag = "normal") {
 
 // Log multiple styled segments in one line
 function writeLogTagged(segments) {
-    if (logOutput.querySelector(".terminal-welcome")) {
+    if (logOutput.querySelector(".empty-welcome")) {
         logOutput.innerHTML = "";
     }
     const line = document.createElement("div");
@@ -407,7 +400,6 @@ function extractValidDeptName(text) {
     let sText = text.trim();
     if (!sText) return null;
     
-    // Step 1: Parentheses extraction (e.g. 제5조(조직담당관) -> 조직담당관)
     const parenMatches = sText.match(/[\(\[\{](.*?)[\)\}\]]/g);
     if (parenMatches) {
         for (let m of parenMatches) {
@@ -423,10 +415,9 @@ function extractValidDeptName(text) {
         }
     }
     
-    // Step 2: Definition checking (소관 사무, 분장 등)
     const isDefinitionLine = ["관장", "분장", "둔다", "소관 사무", "담당 사무"].some(k => sText.includes(k));
     if (isDefinitionLine) {
-        const words = sText.match(/([가-힣·]+(?:과|담당관|관|대변인|단|실|국|본부|처|센터|원|소)(?:장)?)(?=[은는이가의을를에서와과도만으로]|[^가-힣·]|$)/g);
+        const words = sText.match(/([가-힣·]+(?:과|담당관|관|대변인|단|실|국|본부|위원회|처|센터|원|소)(?:장)?)(?=[은는이가의을를에서와과도만으로]|[^가-힣·]|$)/g);
         if (words) {
             for (let word of words) {
                 let wordClean = word.trim();
@@ -442,7 +433,6 @@ function extractValidDeptName(text) {
         }
     }
     
-    // Step 3: General cleaning
     let clean = sText.replace(/[\(\[\{].*?[\)\}\]]/g, '').trim();
     clean = clean.replace(/^제\s*\d+\s*조의?\s*\d*/, '').trim();
     clean = clean.replace(/^[0-9가-힣a-zA-Z\s\.\-]+\.\s*/, '').trim();
@@ -475,17 +465,18 @@ async function querySearchList(target, query, signal) {
             
             if (total === 0) break;
             
+            // lawSearch list API returns elements <law id="..."> even for target="ordin"
             const items = xmlDoc.querySelectorAll("ordin, law, admrul");
             if (items.length === 0) break;
             
             items.forEach(item => {
                 const idAttr = item.getAttribute("id");
-                // Fallback XML tags
                 const tagId = item.querySelector("행정규칙일련번호, 자치법규일련번호, 법령일련번호")?.textContent;
                 const mst = tagId || idAttr;
                 
                 const name = item.querySelector("법령명, 자치법규명, 행정규칙명")?.textContent || "";
-                const org = item.querySelector("소관부처, 소관기관, 소관지자체")?.textContent || "";
+                // 소관기관/지자체기관명 추출 추가
+                const org = item.querySelector("소관부처, 소관기관, 소관지자체, 지자체기관명")?.textContent || "";
                 
                 if (mst && name) {
                     results[mst] = { name: name.trim(), org: org.trim(), target: target };
@@ -501,7 +492,7 @@ async function querySearchList(target, query, signal) {
     return results;
 }
 
-// Start Search Thread Trigger
+// Start Search Trigger
 btnSearchOrdin.addEventListener("click", () => startTracking("ordin"));
 btnSearchJeongyeol.addEventListener("click", () => startTracking("jeongyeol"));
 btnStop.addEventListener("click", stopTracking);
@@ -524,11 +515,10 @@ function setSearchingState(state) {
         btnSearchOrdin.innerHTML = '<i class="fa-solid fa-spinner fa-spin-custom"></i> 가동 중...';
         btnSearchJeongyeol.disabled = true;
     } else {
-        btnSearchOrdin.innerHTML = '<i class="fa-solid fa-crosshairs"></i> 분장사무 정밀 추적';
+        btnSearchOrdin.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> 분장사무 정밀 추적';
         btnSearchJeongyeol.disabled = false;
         
-        // Tab back indicator or enable excel
-        if (latestResults && Object.keys(latestResults).length > 0) {
+        if (latestResults && Object.keys(latestResults.summary).length > 0) {
             btnDownloadExcel.disabled = false;
             inputResultSearch.disabled = false;
         }
@@ -545,7 +535,6 @@ async function startTracking(mode) {
         return;
     }
     
-    // Switch to Terminal Tab automatically
     tabBtnLogs.click();
     
     logOutput.innerHTML = "";
@@ -577,8 +566,8 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
     const isCentral = radioCentral.checked;
     const modeText = mode === "jeongyeol" ? "사무전결" : "행정분류";
     
-    writeLog(`🚀 ${modeText} 엔진 가동: [${mainRegion} ${subRegion ? '-> ' + subRegion : ''}] 정밀 스캔 시작`, "success");
-    writeLog("=".repeat(80));
+    writeLog(`🚀 ${modeText} 엔진 가동: [${mainRegion} ${subRegion ? '-> ' + subRegion : ''}] 정밀 스캔 시작`, "welcome");
+    writeLog("==========================================================================================", "normal");
     
     let targetRegions = [];
     if (isCentral) {
@@ -601,7 +590,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
         const targetLaws = {};
         if (isCentral) {
             if (mode === "jeongyeol") {
-                // [사무전결 모드] 위임전결규정 수집
                 const realRegion = REAL_GOV_MAP[curRegion] || curRegion;
                 const searchQueries = [
                     [`${realRegion} 위임전결규정`, ["admrul"]],
@@ -621,7 +609,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                     }
                 }
             } else {
-                // [행정분류 모드] 기구 직제 수집
                 const govSearchMap = {
                     "재정경제부": ["재정경제부 직제", "재정경제부 직제 시행규칙"],
                     "기획예산처": ["기획예산처와 그 소속기관 직제", "기획예산처와 그 소속기관 직제 시행규칙"],
@@ -655,7 +642,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                 }
             }
         } else {
-            // 지방자치단체
             let queries = [];
             if (mode === "jeongyeol") {
                 queries = [
@@ -721,7 +707,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
             continue;
         }
         
-        // Loop through matches and scrape details
         for (const [mst, ldata] of Object.entries(targetLaws)) {
             if (signal.aborted) throw new DOMException("Aborted", "AbortError");
             
@@ -741,7 +726,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                 const decodedText = await fetchViaProxy(detailUrl, signal);
                 let fullText = "";
                 
-                // Extract CDATA blocks
                 const cdataRegex = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
                 let cdataMatch;
                 const cdatas = [];
@@ -757,7 +741,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                     fullText = xmlDoc.documentElement.textContent || "";
                 }
                 
-                // Scan fullText line by line
                 const matchedLines = [];
                 const spaceStrippedContent = fullText.replace(/\s+/g, "");
                 
@@ -766,7 +749,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                     for (let idx = 0; idx < lines.length; idx++) {
                         const line = lines[idx];
                         if (/^\s*부\s*칙\b/.test(line) || /^\[부칙\]/.test(line)) {
-                            break; // Do not search addenda
+                            break;
                         }
                         
                         const cl = line.replace(/\s+/g, " ").trim();
@@ -825,7 +808,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                         if (tgt === "ordin") {
                             writeLog(`   🔗 https://www.law.go.kr/LSW/ordinInfoP.do?ordinSeq=${mst}`);
                         }
-                        writeLog("-".repeat(80));
+                        writeLog("------------------------------------------------------------------------------------------", "normal");
                         
                         matchedLines.forEach(([dept, matchLine]) => {
                             writeLogTagged([["   ▶ 소관부서: ", "normal"], [`[${dept}]`, "dept"]]);
@@ -834,36 +817,97 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                             if (!finalSummary[orgKey]) finalSummary[orgKey] = [];
                             finalSummary[orgKey].push([lName, dept, matchLine, isOrgLaw, mst]);
                         });
-                        writeLog("-".repeat(80));
+                        writeLog("------------------------------------------------------------------------------------------", "normal");
                     }
                 }
                 
-                // 별표 서식(첨부문서) 추적
+                // 별표 서식 추적 (ordinbyl API 활용해 완벽 수집 및 동기화)
+                let uniqueBylSeqs = [];
+                if (tgt === "ordin") {
+                    try {
+                        let cleanLawName = lName.split('[')[0].trim();
+                        cleanLawName = cleanLawName.replace(/본청\s+|소방공무원\s+|의회사무처\s+|와\s+그\s+소속기관|그\s+소속기관/g, "");
+                        cleanLawName = cleanLawName.replace(/\s*(시행규칙|규칙|조례|규정)$/, "").trim();
+                        
+                        const kichoWords = ["구 ", "군 ", "시 "];
+                        const kichoEnds = ["구", "군", "시"];
+                        const isKichoLaw = kichoWords.some(k => cleanLawName.includes(k)) || kichoEnds.some(k => cleanLawName.endsWith(k));
+                        if (isKichoLaw) {
+                            const regions = ["부산광역시", "서울특별시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도", "경상북도", "경상남도", "제주특별자치도"];
+                            for (let r of regions) {
+                                if (cleanLawName.startsWith(r)) {
+                                    cleanLawName = cleanLawName.replace(r, "").trim();
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        let bylUrl = `https://www.law.go.kr/DRF/lawSearch.do?OC=${API_KEY}&target=ordinbyl&type=XML&search=2&query=${encodeURIComponent(cleanLawName)}&display=100`;
+                        let xmlText = await fetchViaProxy(bylUrl, signal);
+                        
+                        let parser = new DOMParser();
+                        let doc = parser.parseFromString(xmlText, "text/xml");
+                        let blocks = doc.querySelectorAll("ordinbyl");
+                        
+                        if (blocks.length === 0) {
+                            const regionShort = curRegion.replace(/(특별시|광역시|특별자치시|특별자치도|도)/g, "").trim();
+                            const fallbackQueries = [
+                                `${curRegion} 사무 전결`,
+                                `${regionShort} 사무 전결`,
+                                `${curRegion} 행정기구`
+                            ];
+                            for (let fq of fallbackQueries) {
+                                let fallbackUrl = `https://www.law.go.kr/DRF/lawSearch.do?OC=${API_KEY}&target=ordinbyl&type=XML&search=2&query=${encodeURIComponent(fq)}&display=100`;
+                                let xmlFb = await fetchViaProxy(fallbackUrl, signal);
+                                let docFb = parser.parseFromString(xmlFb, "text/xml");
+                                let blocksFb = docFb.querySelectorAll("ordinbyl");
+                                if (blocksFb.length > 0) {
+                                    blocks = blocksFb;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        blocks.forEach(block => {
+                            const refSeq = block.querySelector("관련자치법규일련번호, 자치법규일련번호")?.textContent;
+                            if (refSeq === mst) {
+                                const bylSeq = block.querySelector("별표일련번호")?.textContent;
+                                if (bylSeq) {
+                                    uniqueBylSeqs.push(bylSeq);
+                                }
+                            }
+                        });
+                    } catch (eBylSearch) {
+                        console.error("ordinbyl API 검색 실패:", eBylSearch);
+                    }
+                }
+                
+                // 2차 폴백: 본문 내부 direct regex 추출
                 const directSeqs = [];
                 const re1 = /bylSeq\s*=\s*["']?(\d+)/g;
                 const re2 = /lsBylPop\s*\(\s*["']?(\d+)/g;
                 const re3 = /<별표일련번호>(\d+)<\/별표일련번호>/g;
                 const re4 = /bylSeq\s*:\s*["']?(\d+)/g;
                 
-                let m;
-                while ((m = re1.exec(decodedText)) !== null) directSeqs.push(m[1]);
-                while ((m = re2.exec(decodedText)) !== null) directSeqs.push(m[1]);
-                while ((m = re3.exec(decodedText)) !== null) directSeqs.push(m[1]);
-                while ((m = re4.exec(decodedText)) !== null) directSeqs.push(m[1]);
+                let match;
+                while ((match = re1.exec(decodedText)) !== null) directSeqs.push(match[1]);
+                while ((match = re2.exec(decodedText)) !== null) directSeqs.push(match[1]);
+                while ((match = re3.exec(decodedText)) !== null) directSeqs.push(match[1]);
+                while ((match = re4.exec(decodedText)) !== null) directSeqs.push(match[1]);
                 
-                const uniqueBylSeqs = [...new Set(directSeqs)];
+                directSeqs.forEach(seq => uniqueBylSeqs.push(seq));
+                uniqueBylSeqs = [...new Set(uniqueBylSeqs)];
+                
                 const isOrgLaw = lName.includes("행정기구") || lName.includes("직제") || lName.includes("조직");
                 const orgKey = isCentral ? curRegion : (ldata.org || curRegion);
 
                 for (const bylSeq of uniqueBylSeqs) {
                     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
                     
-                    // Fetch HTML representation of the bylaws directly
                     const bylHtmlUrl = `https://www.law.go.kr/LSW/lsBylInfoR.do?bylSeq=${bylSeq}&type=html`;
                     try {
                         const rawBylHtml = await fetchViaProxy(bylHtmlUrl, signal);
                         
-                        // Parse HTML in-browser
                         const parser = new DOMParser();
                         const htmlDoc = parser.parseFromString(rawBylHtml, "text/html");
                         const text = htmlDoc.body.textContent || "";
@@ -899,7 +943,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                                 foundCount++;
                                 writeLog(`\n🎯 [첨부 별표 내부 분장사무 발견! -> 별표 일련번호 #${bylSeq}]`, "success");
                                 writeLog(`   📜 근거법령: ${lName}`);
-                                writeLog("-".repeat(80));
+                                writeLog("------------------------------------------------------------------------------------------", "normal");
                                 
                                 matchedBylLines.forEach(([dept, matchLine]) => {
                                     writeLogTagged([["   ▶ 소관부서: ", "normal"], [`[${dept}]`, "dept"]]);
@@ -908,7 +952,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                                     if (!finalSummary[orgKey]) finalSummary[orgKey] = [];
                                     finalSummary[orgKey].push([lName, dept, matchLine, isOrgLaw, mst]);
                                 });
-                                writeLog("-".repeat(80));
+                                writeLog("------------------------------------------------------------------------------------------", "normal");
                             }
                         }
                     } catch (eByl) {
@@ -921,7 +965,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
         }
     }
     
-    writeLog("=".repeat(80));
+    writeLog("------------------------------------------------------------------------------------------", "normal");
     if (foundCount === 0) {
         writeLog(`❌ '${keyword}' 관련 분장사무를 찾지 못했습니다.`, "error");
         writeLog("\n💡 검색 팁:");
@@ -935,7 +979,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
     } else {
         writeLog(`🎉 스캔 완료! 총 ${foundCount}개 조직법령에서 '${keyword}' 분석을 완료했습니다.`, "success");
         
-        // Process final report summary
         const cleanedSummary = {};
         const targetKeys = isCentral ? targetRegions : (mainRegion === "전국 광역단체 전체" ? Object.keys(REGION_MAP) : [mainRegion]);
         const missedRegions = [];
@@ -948,10 +991,8 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
             if (!hasAny) missedRegions.push(r);
         });
         
-        // Group and Clean Results
         Object.entries(finalSummary).forEach(([region, matches]) => {
             const hasOrgLaw = matches.some(m => m[3]);
-            // Prefer 1st priority org laws if they exist
             const filteredMatches = hasOrgLaw ? matches.filter(m => m[3]) : matches;
             
             const grouped = {};
@@ -984,11 +1025,69 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
             isCentral: isCentral
         };
         
+        // Print the Final Report directly in the Log Terminal (matching Python's double printing in light box)
+        writeLog("\n" + "------------------------------------------------------------------------------------------", "normal");
+        writeLogTagged([["📢 [최종 분석 보고서: '", "welcome"], [keyword, "dept"], ["' 소관 부서 정밀 매칭 결과]\n", "welcome"]]);
+        writeLog("------------------------------------------------------------------------------------------\n", "normal");
+        
+        let totalCasesCount = 0;
+        let totalOrgsCount = Object.keys(cleanedSummary).length;
+        let totalLawsCount = 0;
+
+        Object.entries(cleanedSummary).forEach(([region, matches]) => {
+            writeLogTagged([["📍 [", "normal"], [region, "region"], ["]", "normal"]]);
+            
+            matches.forEach(m => {
+                totalLawsCount++;
+                totalCasesCount += m.lines.length;
+                
+                let lawType = "";
+                if (isCentral) {
+                    lawType = m.isOrg ? "★ 1순위 (기구 조직 직제/시행규칙)" : "📝 2순위 (일반 사무 규정)";
+                } else {
+                    lawType = m.isOrg ? "★ 1순위 (기구 조직 조례/규칙)" : "📝 2순위 (일반 사무 규정)";
+                }
+                
+                writeLogTagged([["   ▶ 소관 부서 : ", "normal"], [m.dept, "dept"], [` (${lawType})`, "office"]]);
+                writeLogTagged([["   ▶ 근거 법령 : ", "normal"], [m.lName, "law"]]);
+                
+                if (m.lines.length === 1) {
+                    writeLogTagged([["   ▶ 분장 사무 : ", "normal"], [m.lines[0], "office"]]);
+                } else {
+                    writeLogTagged([["   ▶ 분장 사무 :", "normal"]]);
+                    m.lines.forEach(line => {
+                        writeLogTagged([["      - ", "normal"], [line, "office"]]);
+                    });
+                }
+                writeLog(""); 
+            });
+            writeLog("------------------------------------------------------------------------------------------\n", "normal");
+        });
+        
+        if (missedRegions.length > 0) {
+            writeLogTagged([["⚠️ [사무 미검출 지자체/부처 목록 (총 ", "normal"], [String(missedRegions.length), "error"], ["건)]", "normal"]]);
+            writeLog("   - 해당 검색어로 명시적인 소관 사무를 규정하지 않은 단체 목록입니다.", "office");
+            missedRegions.forEach(mr => {
+                writeLogTagged([["   ❌ ", "error"], [mr, "region"]]);
+            });
+            writeLog("\n" + "------------------------------------------------------------------------------------------\n", "normal");
+        }
+        
+        writeLogTagged([
+            ["❖ 전체 정밀 스캔 완료! (총 ", "normal"],
+            [String(totalOrgsCount), "error"],
+            ["개 기관 ", "normal"],
+            [String(totalCasesCount), "success"],
+            ["건 소관 매칭 완료)", "normal"]
+        ]);
+        writeLog("==========================================================================================", "normal");
+        
+        // Also render Report in Tab 2
         renderReport(latestResults, keyword);
     }
 }
 
-// Render the final report (Tab 2)
+// Render the final report (Tab 2 cards)
 function renderReport(data, keyword) {
     reportOutput.innerHTML = "";
     reportSummaryCards.style.display = "grid";
@@ -997,7 +1096,6 @@ function renderReport(data, keyword) {
     let totalLaws = 0;
     let totalCases = 0;
     
-    // Create Summary Elements
     Object.entries(data.summary).forEach(([region, matches]) => {
         const regionBlock = document.createElement("div");
         regionBlock.className = "report-region-block";
@@ -1014,15 +1112,13 @@ function renderReport(data, keyword) {
             const matchCard = document.createElement("div");
             matchCard.className = "report-match-card";
             
-            // Law Priority tag
             let lawType = "";
             if (data.isCentral) {
-                lawType = m.isOrg ? "⭐ 1순위 (기구 조직 직제/시행규칙)" : "📝 2순위 (일반 사무 규정)";
+                lawType = m.isOrg ? "★ 1순위 (기구 조직 직제/시행규칙)" : "📝 2순위 (일반 사무 규정)";
             } else {
-                lawType = m.isOrg ? "⭐ 1순위 (기구 조직 조례/규칙)" : "📝 2순위 (일반 사무 규정)";
+                lawType = m.isOrg ? "★ 1순위 (기구 조직 조례/규칙)" : "📝 2순위 (일반 사무 규정)";
             }
             
-            // Dept / Priority Header
             const deptRow = document.createElement("div");
             deptRow.className = "report-dept-row";
             deptRow.innerHTML = `
@@ -1031,7 +1127,6 @@ function renderReport(data, keyword) {
             `;
             matchCard.appendChild(deptRow);
             
-            // Law Reference Link
             const lawRow = document.createElement("div");
             lawRow.className = "report-law-row";
             const lawUrl = `https://www.law.go.kr/LSW/ordinInfoP.do?ordinSeq=${m.mst}`;
@@ -1041,7 +1136,6 @@ function renderReport(data, keyword) {
             `;
             matchCard.appendChild(lawRow);
             
-            // Work Lines Display
             const workRow = document.createElement("div");
             workRow.className = "report-work-row";
             
@@ -1066,7 +1160,6 @@ function renderReport(data, keyword) {
         reportOutput.appendChild(regionBlock);
     });
     
-    // Renders missed regions
     if (data.missed && data.missed.length > 0) {
         const missingBlock = document.createElement("div");
         missingBlock.className = "report-missing-block";
@@ -1088,13 +1181,12 @@ function renderReport(data, keyword) {
         reportOutput.appendChild(missingBlock);
     }
     
-    // Set counters
     countOrgs.textContent = totalOrgs;
     countLaws.textContent = totalLaws;
     countCases.textContent = totalCases;
 }
 
-// Client-side Excel Downloader using SheetJS
+// Client-side Excel Downloader
 btnDownloadExcel.addEventListener("click", () => {
     if (!latestResults) return;
     
@@ -1119,7 +1211,6 @@ btnDownloadExcel.addEventListener("click", () => {
         
         const ws = XLSX.utils.aoa_to_sheet(wsData);
         
-        // Sheet formatting/column widths helper
         const colWidths = wsData[0].map((_, colIdx) => {
             let maxLen = 0;
             wsData.forEach(row => {
@@ -1140,7 +1231,7 @@ btnDownloadExcel.addEventListener("click", () => {
     }
 });
 
-// "Search Within Results" bottom toolbar feature
+// Result search toolbar functionality
 inputResultSearch.addEventListener("input", performResultSearch);
 inputResultSearch.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -1152,13 +1243,12 @@ btnNextMatch.addEventListener("click", () => navigateSearchResult("next"));
 
 function resetResultSearch() {
     inputResultSearch.value = "";
-    labelSearchStatus.textContent = "0 / 0";
+    labelSearchStatus.textContent = "0/0";
     btnPrevMatch.disabled = true;
     btnNextMatch.disabled = true;
     currentSearchMatches = [];
     currentSearchIndex = -1;
     
-    // Clear previous highlighting classes
     document.querySelectorAll(".search-highlight-active, .search-highlight").forEach(el => {
         el.outerHTML = el.textContent;
     });
@@ -1171,12 +1261,10 @@ function performResultSearch() {
         return;
     }
     
-    // Clear old highlights first
     removeHighlights();
     
     const container = currentActiveSearchBox === "log" ? logOutput : reportOutput;
     
-    // Custom recursive DOM highlighting for matching text nodes
     const textNodes = [];
     const walk = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
     let node;
@@ -1188,12 +1276,10 @@ function performResultSearch() {
     
     currentSearchMatches = [];
     
-    // Wrap matches in highlight span tags
     textNodes.forEach(node => {
         const text = node.textContent;
         const parent = node.parentNode;
         
-        // Skip tags already highlighted or script tags
         if (parent.tagName === "SPAN" && parent.className.includes("search-highlight")) return;
         if (parent.tagName === "SCRIPT" || parent.tagName === "STYLE") return;
         
@@ -1233,7 +1319,7 @@ function performResultSearch() {
         btnNextMatch.disabled = false;
     } else {
         currentSearchIndex = -1;
-        labelSearchStatus.textContent = "0 / 0";
+        labelSearchStatus.textContent = "0/0";
         btnPrevMatch.disabled = true;
         btnNextMatch.disabled = true;
     }
@@ -1246,7 +1332,6 @@ function removeHighlights() {
         const textNode = document.createTextNode(span.textContent);
         span.parentNode.replaceChild(textNode, span);
     });
-    // Normalize adjacent text nodes
     container.normalize();
 }
 
@@ -1259,7 +1344,7 @@ function highlightActiveMatch() {
             el.classList.remove("search-highlight-active");
         }
     });
-    labelSearchStatus.textContent = `${currentSearchIndex + 1} / ${currentSearchMatches.length}`;
+    labelSearchStatus.textContent = `${currentSearchIndex + 1}/${currentSearchMatches.length}`;
 }
 
 function navigateSearchResult(direction) {
