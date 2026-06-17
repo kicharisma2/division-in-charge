@@ -178,6 +178,7 @@ body {
 .control-row {
     display: flex;
     align-items: center;
+    justify-content: flex-start !important;
     gap: 24px;
     flex-wrap: wrap;
 }
@@ -249,16 +250,18 @@ body {
 
 /* Selector Fields */
 .selectors-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(280px, 400px));
-    gap: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start !important;
+    gap: 20px;
+    width: 100%;
 }
 
 .selector-field {
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 100%;
+    flex-shrink: 0;
 }
 
 .field-label {
@@ -266,12 +269,27 @@ body {
     font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
-    min-width: 95px;
+}
+
+/* Col 1 labels */
+.selectors-row > .selector-field:nth-child(1) .field-label,
+.actions-row .keyword-field .field-label {
+    width: 110px;
+    min-width: 110px;
+}
+
+/* Col 2 label */
+#groupSub .field-label {
+    width: 80px;
+    min-width: 80px;
 }
 
 .select-wrapper {
     position: relative;
-    flex: 1;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
+    flex: none;
 }
 
 .form-select {
@@ -314,7 +332,8 @@ body {
 .actions-row {
     display: flex;
     align-items: center;
-    gap: 24px;
+    justify-content: flex-start !important;
+    gap: 20px;
     width: 100%;
 }
 
@@ -322,12 +341,15 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
-    flex: 1;
-    max-width: 500px;
+    flex: none;
+    width: 340px; /* 110px label + 10px gap + 220px input */
 }
 
 .form-input {
-    flex: 1;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
+    flex: none;
     padding: 6px 12px;
     font-family: inherit;
     font-size: 13px;
@@ -357,14 +379,22 @@ body {
     justify-content: center;
     gap: 6px;
     padding: 0 16px;
-    height: 32px;
+    height: 38px; /* High premium look */
     font-family: inherit;
-    font-size: 13px;
+    font-size: 13.5px;
     font-weight: 700;
     border: none;
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all var(--transition-fast);
+}
+
+#btnSearchOrdin, #btnSearchJeongyeol {
+    width: 165px;
+}
+
+#btnStop {
+    width: 90px;
 }
 
 .btn-primary {

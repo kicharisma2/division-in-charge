@@ -224,6 +224,120 @@ async function fetchViaProxy(url, signal) {
     throw new Error(`모든 CORS 프록시 서버 호출에 실패했습니다. (최종 에러: ${lastError?.message})`);
 }
 
+// Fetch helper for binary content
+async function fetchViaProxyArrayBuffer(url, signal) {
+    let lastError = null;
+    for (let i = 0; i < PROXY_TEMPLATES.length; i++) {
+        if (signal && signal.aborted) {
+            throw new DOMException("Aborted", "AbortError");
+        }
+        const proxyUrl = PROXY_TEMPLATES[i](url);
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
+            
+            let linkedSignal = controller.signal;
+            if (signal) {
+                signal.addEventListener("abort", () => controller.abort());
+            }
+
+            const response = await fetch(proxyUrl, { signal: linkedSignal });
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return await response.arrayBuffer();
+        } catch (e) {
+            console.warn(`Proxy ${i+1} failed: ${url}`, e);
+            lastError = e;
+        }
+    }
+    throw new Error(`모든 CORS 프록시 서버 호출에 실패했습니다. (최종 에러: ${lastError?.message})`);
+}
+
+// client-side Excel parser using SheetJS
+async function parseExcelWithDept(arrayBuffer, keyword) {
+    const results = [];
+    try {
+        const wb = XLSX.read(arrayBuffer, { type: "array" });
+        const spaceStrippedKeyword = keyword.replace(/\s+/g, "");
+        
+        for (const sheetName of wb.SheetNames) {
+            const ws = wb.Sheets[sheetName];
+            let sheetDept = extractValidDeptName(sheetName);
+            if (sheetDept && !isValidDeptName(sheetDept)) {
+                sheetDept = null;
+            }
+            
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+            const maxRow = rows.length;
+            if (maxRow === 0) continue;
+            
+            const deptMap = [];
+            if (sheetDept) {
+                deptMap.push({ rIdx: 0, dept: sheetDept });
+            }
+            
+            for (let rIdx = 0; rIdx < maxRow; rIdx++) {
+                const row = rows[rIdx] || [];
+                const maxCol = Math.min(row.length, 8);
+                for (let colIdx = 0; colIdx < maxCol; colIdx++) {
+                    const cellVal = String(row[colIdx]).trim();
+                    if (!cellVal) continue;
+                    const deptExt = extractValidDeptName(cellVal);
+                    if (deptExt && isValidDeptName(deptExt)) {
+                        deptMap.push({ rIdx, dept: deptExt });
+                    }
+                }
+            }
+            
+            for (let r = 0; r < maxRow; r++) {
+                const row = rows[r] || [];
+                for (let c = 0; c < row.length; c++) {
+                    const val = String(row[c]).trim();
+                    if (!val) continue;
+                    
+                    const valStripped = val.replace(/\s+/g, "");
+                    if (valStripped.includes(spaceStrippedKeyword)) {
+                        let dept = "알 수 없음 (부서 매칭 실패)";
+                        if (deptMap.length > 0) {
+                            const validDepts = deptMap.filter(d => d.rIdx <= r);
+                            if (validDepts.length > 0) {
+                                dept = validDepts.reduce((prev, curr) => curr.rIdx > prev.rIdx ? curr : prev).dept;
+                            } else {
+                                dept = deptMap.reduce((prev, curr) => Math.abs(curr.rIdx - r) < Math.abs(prev.rIdx - r) ? curr : prev).dept;
+                            }
+                        }
+                        
+                        if (sheetDept && (dept === "알 수 없음 (부서 매칭 실패)" || dept !== sheetDept)) {
+                            if (dept === "알 수 없음 (부서 매칭 실패)") {
+                                dept = sheetDept;
+                            } else {
+                                const commonNoise = ["총무과", "행정과", "행정지원과", "인사과", "행정지원부", "총무부", "기획실"];
+                                if (commonNoise.some(x => dept.includes(x))) {
+                                    const cleanS = sheetDept.replace(/(실|국|본부|과|담당관|단|처|센터|원|소)$/, "");
+                                    const cleanD = dept.replace(/(실|국|본부|과|담당관|단|처|센터|원|소)$/, "");
+                                    const hasRelation = [...cleanS].some(char => cleanD.includes(char)) || [...cleanD].some(char => cleanS.includes(char));
+                                    if (!hasRelation) {
+                                        dept = sheetDept;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        const cleanMatchLine = val.replace(/[\r\n\s]+/g, ' ').trim();
+                        results.push([dept, cleanMatchLine]);
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Excel 파싱 에러:", e);
+    }
+    return results;
+}
+
 // Logging functions (renders to clean Light Logs Panel)
 function writeLog(text, tag = "normal") {
     if (logOutput.querySelector(".empty-welcome")) {
@@ -362,7 +476,7 @@ function isValidDeptName(name, originalText = "") {
     if (clean.endsWith("관") && !clean.endsWith("담당관")) {
         const validGwanEnds = ["기획관", "대변인", "홍보관", "심의관", "보좌관", "조정관", "협력관", "감사관", "통상관", "영사관"];
         if (["주무관", "조사관", "수사관", "행정관", "전문관", "지도관", "자문관", "연구관", "분석관", "검사관", "심사관", "상담관", "안전관"].some(x => clean.endsWith(x))) {
-            return false;
+             return false;
         }
         if (clean.length >= 3 && !validGwanEnds.some(x => clean.endsWith(x))) {
             if (!["기획", "심의", "홍보", "조정", "협력"].some(x => clean.includes(x))) {
@@ -438,11 +552,211 @@ function extractValidDeptName(text) {
     clean = clean.replace(/^[0-9가-힣a-zA-Z\s\.\-]+\.\s*/, '').trim();
     clean = clean.replace(/^[가-힣a-zA-Z0-9\-\.\s]+\)\s*/, '').trim();
     clean = clean.replace(/[^가-힣a-zA-Z\s\u2027·]/g, '').trim();
-    if (isValidDeptName(clean, sText)) {
-        return clean;
-    }
-    
     return null;
+}
+
+// HWP 5.0 binary parser using global CFB and Pako
+function parseHwpText(arrayBuffer) {
+    if (typeof CFB === "undefined" || typeof pako === "undefined") {
+        console.warn("CFB or pako is not loaded.");
+        return "";
+    }
+    try {
+        const bytes = new Uint8Array(arrayBuffer);
+        const cfb = CFB.read(bytes, { type: "array" });
+        const sections = cfb.FileIndex.filter(file => file.name.includes("BodyText/Section"));
+        sections.sort((a, b) => a.name.localeCompare(b.name));
+        
+        // Read file header to check compression flag
+        const fileHeaderFile = cfb.FileIndex.find(file => file.name.includes("FileHeader"));
+        let isCompressed = true;
+        if (fileHeaderFile && fileHeaderFile.content) {
+            const headerBytes = fileHeaderFile.content;
+            if (headerBytes.length > 36) {
+                isCompressed = (headerBytes[36] & 1) === 1;
+            }
+        }
+        
+        const extractedText = [];
+        for (const sec of sections) {
+            let data = sec.content;
+            if (!data || data.length === 0) continue;
+            
+            if (isCompressed) {
+                try {
+                    data = pako.inflateRaw(data);
+                } catch (eRaw) {
+                    try {
+                        data = pako.inflate(data);
+                    } catch (eZlib) {
+                        console.warn("Decompression failed for HWP section:", sec.name, eZlib);
+                        continue;
+                    }
+                }
+            }
+            
+            let i = 0;
+            while (i < data.length) {
+                if (i + 4 > data.length) break;
+                
+                const header = data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24);
+                const recType = header & 0x3FF;
+                let length = (header >> 20) & 0xFFF;
+                
+                i += 4;
+                if (length === 0xFFF) {
+                    if (i + 4 > data.length) break;
+                    length = data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24);
+                    i += 4;
+                }
+                
+                if (i + length > data.length) break;
+                
+                if (recType === 67) { // HWPTAG_PARA_TEXT
+                    let textVal = "";
+                    for (let j = 0; j < length; j += 2) {
+                        if (j + 2 > length) break;
+                        const charCode = data[i + j] | (data[i + j + 1] << 8);
+                        if (charCode >= 0x0020 || charCode === 0x0009 || charCode === 0x000A || charCode === 0x000D) {
+                            textVal += String.fromCharCode(charCode);
+                        }
+                    }
+                    extractedText.push(textVal);
+                }
+                i += length;
+            }
+        }
+        return extractedText.join("\n");
+    } catch (e) {
+        console.error("HWP parsing failed:", e);
+        return "";
+    }
+}
+
+// HWPX zip archive XML parser using JSZip
+async function parseHwpxText(arrayBuffer) {
+    if (typeof JSZip === "undefined") {
+        console.warn("JSZip is not loaded.");
+        return "";
+    }
+    try {
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const sectionFiles = [];
+        
+        zip.forEach((relativePath, file) => {
+            if (relativePath.includes("Contents/section")) {
+                sectionFiles.push(file);
+            }
+        });
+        
+        sectionFiles.sort((a, b) => a.name.localeCompare(b.name));
+        
+        const textParts = [];
+        for (const file of sectionFiles) {
+            const xmlContent = await file.async("text");
+            const texts = xmlContent.match(/<hp:t[^>]*>([\s\S]*?)<\/hp:t>/gi) || xmlContent.match(/<t[^>]*>([\s\S]*?)<\/t>/gi) || [];
+            
+            for (let t of texts) {
+                let tClean = t.replace(/<[^>]+>/g, "");
+                tClean = tClean
+                    .replace(/&amp;/g, "&")
+                    .replace(/&lt;/g, "<")
+                    .replace(/&gt;/g, ">")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&apos;/g, "'");
+                textParts.push(tClean);
+            }
+        }
+        return textParts.join("\n");
+    } catch (e) {
+        console.error("HWPX parsing failed:", e);
+        return "";
+    }
+}
+
+// Raw binary fallback parser
+function parseRawBinaryText(uint8Array) {
+    const extracted = [];
+    const len = uint8Array.length;
+    
+    // 1. UTF-16 character scan
+    try {
+        let utf16Chars = [];
+        for (let j = 0; j < len - 1; j += 2) {
+            const charCode = uint8Array[j] | (uint8Array[j+1] << 8);
+            if ((charCode >= 0xAC00 && charCode <= 0xD7A3) || 
+                (charCode >= 0x3130 && charCode <= 0x318F) || 
+                (charCode >= 0x0020 && charCode <= 0x007E) || 
+                charCode === 0x0009 || charCode === 0x000A || charCode === 0x000D) {
+                utf16Chars.push(String.fromCharCode(charCode));
+            } else {
+                if (utf16Chars.length > 0) {
+                    const chunk = utf16Chars.join("");
+                    if (chunk.trim().length >= 2) {
+                        extracted.push(chunk);
+                    }
+                    utf16Chars = [];
+                }
+            }
+        }
+        if (utf16Chars.length > 0) {
+            const chunk = utf16Chars.join("");
+            if (chunk.trim().length >= 2) {
+                extracted.push(chunk);
+            }
+        }
+    } catch (e) {}
+    
+    // 2. CP949 and UTF-8 decoder scan
+    try {
+        const decoderCp949 = new TextDecoder("cp949");
+        const textCp949 = decoderCp949.decode(uint8Array);
+        const matchesCp949 = textCp949.match(/[가-힣a-zA-Z0-9\s]{2,}/g);
+        if (matchesCp949) extracted.push(...matchesCp949);
+        
+        const decoderUtf8 = new TextDecoder("utf-8");
+        const textUtf8 = decoderUtf8.decode(uint8Array);
+        const matchesUtf8 = textUtf8.match(/[가-힣a-zA-Z0-9\s]{2,}/g);
+        if (matchesUtf8) extracted.push(...matchesUtf8);
+    } catch (e) {}
+    
+    return extracted.join("\n");
+}
+
+// Scan parsed text for matching paragraphs and track departments
+function scanTextForBylawMatches(text, keyword) {
+    const results = [];
+    const spaceStrippedKeyword = keyword.replace(/\s+/g, "");
+    const spaceStrippedText = text.replace(/\s+/g, "");
+    
+    if (spaceStrippedText.includes(spaceStrippedKeyword)) {
+        const seenLines = new Set();
+        const lines = text.split('\n');
+        
+        lines.forEach((line, lineIdx) => {
+            const cl = line.replace(/\s+/g, " ").trim();
+            const strippedCl = cl.replace(/\s+/g, "");
+            
+            if (strippedCl.includes(spaceStrippedKeyword) && cl.length > 1) {
+                let foundDept = "확인실패";
+                for (let lookBack = lineIdx; lookBack >= 0; lookBack--) {
+                    const backLine = lines[lookBack].trim();
+                    const deptExt = extractValidDeptName(backLine);
+                    if (deptExt) {
+                        if (isValidDeptName(deptExt)) {
+                            foundDept = deptExt;
+                            break;
+                        }
+                    }
+                }
+                if (!seenLines.has(cl)) {
+                    results.push([foundDept, cl]);
+                    seenLines.add(cl);
+                }
+            }
+        });
+    }
+    return results;
 }
 
 // API list querying function
@@ -457,32 +771,44 @@ async function querySearchList(target, query, signal) {
         try {
             const raw = await fetchViaProxy(url, signal);
             
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(raw, "text/xml");
-            
-            const totalElement = xmlDoc.querySelector("totalCnt");
-            const total = totalElement ? parseInt(totalElement.textContent) || 0 : 0;
+            const totalMatch = raw.match(/<totalCnt>(\d+)<\/totalCnt>/);
+            const total = totalMatch ? parseInt(totalMatch[1]) || 0 : 0;
             
             if (total === 0) break;
             
-            // lawSearch list API returns elements <law id="..."> even for target="ordin"
-            const items = xmlDoc.querySelectorAll("ordin, law, admrul");
-            if (items.length === 0) break;
-            
-            items.forEach(item => {
-                const idAttr = item.getAttribute("id");
-                const tagId = item.querySelector("행정규칙일련번호, 자치법규일련번호, 법령일련번호")?.textContent;
-                const mst = tagId || idAttr;
+            const itemPattern = new RegExp(`<(${target}|law|admrul|ordin)\\b[^>]*id="(\\d+)"[^>]*>([\\s\\S]*?)</\\s*\\1>`, "gi");
+            let match;
+            let foundAny = false;
+            while ((match = itemPattern.exec(raw)) !== null) {
+                foundAny = true;
+                const idAttr = match[2];
+                const itemBody = match[3];
                 
-                const name = item.querySelector("법령명, 자치법규명, 행정규칙명")?.textContent || "";
-                // 소관기관/지자체기관명 추출 추가
-                const org = item.querySelector("소관부처, 소관기관, 소관지자체, 지자체기관명")?.textContent || "";
+                const tagIdMatch = itemBody.match(/<(?:행정규칙일련번호|자치법규일련번호|법령일련번호)>(\d+)<\/(?:행정규칙일련번호|자치법규일련번호|법령일련번호)>/);
+                const mst = tagIdMatch ? tagIdMatch[1] : idAttr;
+                
+                let name = "";
+                const nameCdataMatch = itemBody.match(/<(?:법령명|자치법규명|행정규칙명)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:법령명|자치법규명|행정규칙명)>/);
+                if (nameCdataMatch) {
+                    name = (nameCdataMatch[1] || nameCdataMatch[2] || "").trim();
+                }
+                
+                let org = "";
+                const orgMatch = itemBody.match(/<(?:소관부처|소관기관|소관지자체|지자체기관명)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:소관부처|소관기관|소관지자체|지자체기관명)>/);
+                if (orgMatch) {
+                    org = (orgMatch[1] || orgMatch[2] || "").trim();
+                } else {
+                    const regionRegex = />([가-힣]+(?:광역시|특별시|특별자치시|도|특별자치도)(?:\s*[가-힣]+(?:구|군|시))?)</;
+                    const fallbackOrgMatch = itemBody.match(regionRegex);
+                    if (fallbackOrgMatch) org = fallbackOrgMatch[1].trim();
+                }
                 
                 if (mst && name) {
-                    results[mst] = { name: name.trim(), org: org.trim(), target: target };
+                    results[mst] = { name: name, org: org, target: target };
                 }
-            });
+            }
             
+            if (!foundAny) break;
             if (page * display >= total) break;
         } catch (e) {
             console.error("XML 검색 리스트 요청 실패:", e);
@@ -736,14 +1062,15 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                 if (cdatas.length > 0) {
                     fullText = cdatas.join("\n");
                 } else {
-                    const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(decodedText, "text/xml");
-                    fullText = xmlDoc.documentElement.textContent || "";
+                    fullText = decodedText.replace(/<[^>]+>/g, "");
                 }
                 
                 const matchedLines = [];
                 const spaceStrippedContent = fullText.replace(/\s+/g, "");
                 
+                const isOrgLaw = lName.includes("행정기구") || lName.includes("직제") || lName.includes("조직");
+                const orgKey = isCentral ? curRegion : (ldata.org || curRegion);
+
                 if (spaceStrippedContent.includes(spaceStrippedKeyword)) {
                     const lines = fullText.split('\n');
                     for (let idx = 0; idx < lines.length; idx++) {
@@ -799,9 +1126,6 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                         }
                     }
                     
-                    const isOrgLaw = lName.includes("행정기구") || lName.includes("직제") || lName.includes("조직");
-                    const orgKey = isCentral ? curRegion : (ldata.org || curRegion);
-                    
                     if (matchedLines.length > 0) {
                         foundCount++;
                         writeLog(`\n🎯 [소관 부서 본문 내 분장사무 발견! -> ${lName}]`, "success");
@@ -822,7 +1146,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                 }
                 
                 // 별표 서식 추적 (ordinbyl API 활용해 완벽 수집 및 동기화)
-                let uniqueBylSeqs = [];
+                let bylLinks = [];
                 if (tgt === "ordin") {
                     try {
                         let cleanLawName = lName.split('[')[0].trim();
@@ -845,9 +1169,12 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                         let bylUrl = `https://www.law.go.kr/DRF/lawSearch.do?OC=${API_KEY}&target=ordinbyl&type=XML&search=2&query=${encodeURIComponent(cleanLawName)}&display=100`;
                         let xmlText = await fetchViaProxy(bylUrl, signal);
                         
-                        let parser = new DOMParser();
-                        let doc = parser.parseFromString(xmlText, "text/xml");
-                        let blocks = doc.querySelectorAll("ordinbyl");
+                        let blocks = [];
+                        const ordinbylRegex = /<ordinbyl id="\d+">([\s\S]*?)<\/ordinbyl>/g;
+                        let bMatch;
+                        while ((bMatch = ordinbylRegex.exec(xmlText)) !== null) {
+                            blocks.push(bMatch[1]);
+                        }
                         
                         if (blocks.length === 0) {
                             const regionShort = curRegion.replace(/(특별시|광역시|특별자치시|특별자치도|도)/g, "").trim();
@@ -859,22 +1186,57 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                             for (let fq of fallbackQueries) {
                                 let fallbackUrl = `https://www.law.go.kr/DRF/lawSearch.do?OC=${API_KEY}&target=ordinbyl&type=XML&search=2&query=${encodeURIComponent(fq)}&display=100`;
                                 let xmlFb = await fetchViaProxy(fallbackUrl, signal);
-                                let docFb = parser.parseFromString(xmlFb, "text/xml");
-                                let blocksFb = docFb.querySelectorAll("ordinbyl");
-                                if (blocksFb.length > 0) {
-                                    blocks = blocksFb;
+                                let fbBlocks = [];
+                                while ((bMatch = ordinbylRegex.exec(xmlFb)) !== null) {
+                                    fbBlocks.push(bMatch[1]);
+                                }
+                                if (fbBlocks.length > 0) {
+                                    blocks = fbBlocks;
                                     break;
                                 }
                             }
                         }
                         
-                        blocks.forEach(block => {
-                            const refSeq = block.querySelector("관련자치법규일련번호, 자치법규일련번호")?.textContent;
+                        blocks.forEach(bData => {
+                            let refSeq = "";
+                            const refSeqMatch1 = bData.match(/<관련자치법규일련번호>(\d+)<\/관련자치법규일련번호>/);
+                            if (refSeqMatch1) refSeq = refSeqMatch1[1];
+                            else {
+                                const refSeqMatch2 = bData.match(/<자치법규일련번호>(\d+)<\/자치법규일련번호>/);
+                                if (refSeqMatch2) refSeq = refSeqMatch2[1];
+                            }
+                            
                             if (refSeq === mst) {
-                                const bylSeq = block.querySelector("별표일련번호")?.textContent;
-                                if (bylSeq) {
-                                    uniqueBylSeqs.push(bylSeq);
+                                let bylName = "별표 서식";
+                                const bylNameMatch = bData.match(/<별표명>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/별표명>/);
+                                if (bylNameMatch) bylName = (bylNameMatch[1] || bylNameMatch[2] || "").trim();
+                                
+                                let flLink = "";
+                                const flLinkMatch = bData.match(/<별표서식파일링크>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/별표서식파일링크>/);
+                                if (flLinkMatch) flLink = (flLinkMatch[1] || flLinkMatch[2] || "").trim();
+                                
+                                let bylSeq = "";
+                                const bylSeqMatch = bData.match(/<별표일련번호>(\d+)<\/별표일련번호>/);
+                                if (bylSeqMatch) bylSeq = bylSeqMatch[1];
+                                
+                                const htmlUrl = `https://www.law.go.kr/LSW/lsBylInfoR.do?bylSeq=${bylSeq}&type=html`;
+                                let binaryUrl = "";
+                                if (flLink) {
+                                    flLink = flLink.replace(/&amp;/gi, "&");
+                                    const gubunMatch = flLink.match(/gubun=([^&]+)/i);
+                                    const flSeqMatch = flLink.match(/flSeq=([^&]+)/i);
+                                    if (gubunMatch && flSeqMatch) {
+                                        binaryUrl = `https://www.law.go.kr/LSW/flDownload.do?gubun=${gubunMatch[1]}&flSeq=${flSeqMatch[1]}`;
+                                    } else {
+                                        binaryUrl = flLink.startsWith('/') ? `https://www.law.go.kr${flLink}` : flLink;
+                                    }
+                                } else {
+                                    if (bylSeq) {
+                                        binaryUrl = `https://www.law.go.kr/LSW/lsBylInfoDown.do?bylSeq=${bylSeq}`;
+                                    }
                                 }
+                                binaryUrl = binaryUrl.replace(/&amp;/gi, "&");
+                                bylLinks.push({ bylName, htmlUrl, binaryUrl, refUrl: detailUrl, bylContent: "" });
                             }
                         });
                     } catch (eBylSearch) {
@@ -882,81 +1244,340 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
                     }
                 }
                 
-                // 2차 폴백: 본문 내부 direct regex 추출
+                // 2. Extract direct 별표 blocks from detail XML (ordin, admrul, law)
+                let bylBlocks = [];
+                let tempXml = decodedText;
+                
+                // 1단계: 별표서식 (주로 행정규칙 admrul)
+                const abRegex = /<별표서식\b[^>]*>([\s\S]*?)<\/별표서식>/g;
+                let abMatch;
+                while ((abMatch = abRegex.exec(tempXml)) !== null) {
+                    bylBlocks.push(abMatch[1]);
+                    tempXml = tempXml.replace(abMatch[0], "");
+                }
+                
+                // 2단계: 별표 (주로 자치법규 ordin, 법령 law)
+                const lbRegex = /<별표\b[^>]*>([\s\S]*?)<\/별표>/g;
+                let lbMatch;
+                while ((lbMatch = lbRegex.exec(tempXml)) !== null) {
+                    bylBlocks.push(lbMatch[1]);
+                    tempXml = tempXml.replace(lbMatch[0], "");
+                }
+                
+                // 3단계: ordinbyl
+                const obRegex = /<ordinbyl\b[^>]*>([\s\S]*?)<\/ordinbyl>/g;
+                let obMatch;
+                while ((obMatch = obRegex.exec(tempXml)) !== null) {
+                    bylBlocks.push(obMatch[1]);
+                }
+                
+                bylBlocks.forEach(blkText => {
+                    try {
+                        let title = "별표 서식";
+                        const titleMatch = blkText.match(/<(?:별표명|별표제목|명칭)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:별표명|별표제목|명칭)>/);
+                        if (titleMatch) title = (titleMatch[1] || titleMatch[2] || "").trim();
+                        
+                        let bylSeq = "";
+                        const bylSeqMatch = blkText.match(/<별표일련번호>(\d+)<\/별표일련번호>/);
+                        if (bylSeqMatch) bylSeq = bylSeqMatch[1];
+                        
+                        let flLink = "";
+                        const flLinkMatch = blkText.match(/<별표서식파일링크>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/별표서식파일링크>/);
+                        if (flLinkMatch) flLink = (flLinkMatch[1] || flLinkMatch[2] || "").trim().replace(/&amp;/gi, "&");
+                        
+                        let attachedFn = "";
+                        const attachedFnMatch = blkText.match(/<별표첨부파일명>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/별표첨부파일명>/);
+                        if (attachedFnMatch) attachedFn = (attachedFnMatch[1] || attachedFnMatch[2] || "").trim();
+                        
+                        let bylContent = "";
+                        const bylContentMatch = blkText.match(/<별표내용>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/별표내용>/);
+                        if (bylContentMatch) bylContent = (bylContentMatch[1] || bylContentMatch[2] || "").trim();
+                        
+                        let htmlUrl = "";
+                        let binaryUrl = "";
+                        if (bylSeq) {
+                            htmlUrl = `https://www.law.go.kr/LSW/lsBylInfoR.do?bylSeq=${bylSeq}&type=html`;
+                            binaryUrl = `https://www.law.go.kr/LSW/lsBylInfoDown.do?bylSeq=${bylSeq}`;
+                        }
+                        
+                        if (flLink) {
+                            const gubunMatch = flLink.match(/gubun=([^&]+)/i);
+                            const flSeqMatch = flLink.match(/flSeq=([^&]+)/i);
+                            if (gubunMatch && flSeqMatch) {
+                                binaryUrl = `https://www.law.go.kr/LSW/flDownload.do?gubun=${gubunMatch[1]}&flSeq=${flSeqMatch[1]}`;
+                            } else if (flSeqMatch) {
+                                const gubun = tgt === "ordin" ? "ELIS" : "ADMRUL";
+                                binaryUrl = `https://www.law.go.kr/LSW/flDownload.do?gubun=${gubun}&flSeq=${flSeqMatch[1]}`;
+                            } else {
+                                binaryUrl = flLink.startsWith('/') ? `https://www.law.go.kr${flLink}` : flLink;
+                            }
+                        }
+                        
+                        if (!binaryUrl && attachedFn) {
+                            if (attachedFn.includes("flSeq=")) {
+                                const flSeqMatch = attachedFn.match(/flSeq=(\d+)/);
+                                if (flSeqMatch) {
+                                    const gubun = tgt === "ordin" ? "ELIS" : "ADMRUL";
+                                    binaryUrl = `https://www.law.go.kr/LSW/flDownload.do?gubun=${gubun}&flSeq=${flSeqMatch[1]}`;
+                                }
+                            }
+                        }
+                        
+                        if (binaryUrl.includes("gubun=ELISIMG") || binaryUrl.includes("gubun=ADMRULIMG")) {
+                            binaryUrl = "";
+                        }
+                        
+                        if (htmlUrl || binaryUrl) {
+                            let isDup = false;
+                            for (let old of bylLinks) {
+                                if (bylSeq && old.htmlUrl.includes(bylSeq)) { isDup = true; break; }
+                                if (binaryUrl && old.binaryUrl === binaryUrl) { isDup = true; break; }
+                            }
+                            if (!isDup) {
+                                bylLinks.push({ bylName: title, htmlUrl, binaryUrl: binaryUrl.replace(/&amp;/gi, "&"), refUrl: detailUrl, bylContent });
+                            }
+                        }
+                    } catch (e) {
+                        console.error("별표 블록 파싱 실패:", e);
+                    }
+                });
+                
+                // direct regex extraction fallback
                 const directSeqs = [];
                 const re1 = /bylSeq\s*=\s*["']?(\d+)/g;
                 const re2 = /lsBylPop\s*\(\s*["']?(\d+)/g;
                 const re3 = /<별표일련번호>(\d+)<\/별표일련번호>/g;
                 const re4 = /bylSeq\s*:\s*["']?(\d+)/g;
                 
-                let match;
-                while ((match = re1.exec(decodedText)) !== null) directSeqs.push(match[1]);
-                while ((match = re2.exec(decodedText)) !== null) directSeqs.push(match[1]);
-                while ((match = re3.exec(decodedText)) !== null) directSeqs.push(match[1]);
-                while ((match = re4.exec(decodedText)) !== null) directSeqs.push(match[1]);
+                let dMatch;
+                while ((dMatch = re1.exec(decodedText)) !== null) directSeqs.push(dMatch[1]);
+                while ((dMatch = re2.exec(dMatch)) !== null) directSeqs.push(dMatch[1]); // Wait, re2 is global, this is correct
+                // Correcting potential regex match loops in JS:
+                // Actually let's use matchAll or simple matches to avoid infinite loop
+                const re1m = decodedText.match(/bylSeq\s*=\s*["']?(\d+)/gi);
+                if (re1m) re1m.forEach(m => { const s = m.match(/\d+/); if (s) directSeqs.push(s[0]); });
+                const re2m = decodedText.match(/lsBylPop\s*\(\s*["']?(\d+)/gi);
+                if (re2m) re2m.forEach(m => { const s = m.match(/\d+/); if (s) directSeqs.push(s[0]); });
+                const re3m = decodedText.match(/<별표일련번호>(\d+)<\/별표일련번호>/gi);
+                if (re3m) re3m.forEach(m => { const s = m.match(/\d+/); if (s) directSeqs.push(s[0]); });
+                const re4m = decodedText.match(/bylSeq\s*:\s*["']?(\d+)/gi);
+                if (re4m) re4m.forEach(m => { const s = m.match(/\d+/); if (s) directSeqs.push(s[0]); });
                 
-                directSeqs.forEach(seq => uniqueBylSeqs.push(seq));
-                uniqueBylSeqs = [...new Set(uniqueBylSeqs)];
-                
-                const isOrgLaw = lName.includes("행정기구") || lName.includes("직제") || lName.includes("조직");
-                const orgKey = isCentral ? curRegion : (ldata.org || curRegion);
+                const uniqueDirectSeqs = [...new Set(directSeqs)];
+                uniqueDirectSeqs.forEach(seq => {
+                    if (seq !== mst) {
+                        const htmlUrl = `https://www.law.go.kr/LSW/lsBylInfoR.do?bylSeq=${seq}&type=html`;
+                        const binaryUrl = `https://www.law.go.kr/LSW/lsBylInfoDown.do?bylSeq=${seq}`;
+                        let isDup = false;
+                        for (let old of bylLinks) {
+                            if (old.htmlUrl.includes(seq) || old.binaryUrl.includes(seq)) { isDup = true; break; }
+                        }
+                        if (!isDup) {
+                            bylLinks.push({ bylName: `별표 서식(직접추출_${seq})`, htmlUrl, binaryUrl, refUrl: detailUrl, bylContent: "" });
+                        }
+                    }
+                });
 
-                for (const bylSeq of uniqueBylSeqs) {
+                // flSeq extraction fallback
+                const flRegex = /flDownload\.do\?(?:gubun=([^&]+)&(?:amp;)?)?flSeq=(\d+)/gi;
+                let flMatch;
+                while ((flMatch = flRegex.exec(decodedText)) !== null) {
+                    const gubun = flMatch[1] || (tgt === "ordin" ? "ELIS" : "ADMRUL");
+                    const flSeq = flMatch[2];
+                    if (["ELISIMG", "ADMRULIMG"].includes(gubun)) continue;
+                    const binaryUrl = `https://www.law.go.kr/LSW/flDownload.do?gubun=${gubun}&flSeq=${flSeq}`;
+                    
+                    let isDup = false;
+                    for (let old of bylLinks) {
+                        if (old.binaryUrl.includes(flSeq)) { isDup = true; break; }
+                    }
+                    if (!isDup) {
+                        bylLinks.push({ bylName: `별표 서식(flSeq추출_${flSeq})`, htmlUrl: "", binaryUrl, refUrl: detailUrl, bylContent: "" });
+                    }
+                }
+
+                // Filter out non-boncheong attachments if subRegion is "본청"
+                if (!isCentral && (!subRegion || subRegion === "본청")) {
+                    bylLinks = bylLinks.filter(item => {
+                        return !["직속기관", "사업소", "의회", "소방", "합의제행정기관", "합의제"].some(k => item.bylName.includes(k));
+                    });
+                }
+
+                // Scan each of the collected bylaws (별표)
+                for (const item of bylLinks) {
                     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
                     
-                    const bylHtmlUrl = `https://www.law.go.kr/LSW/lsBylInfoR.do?bylSeq=${bylSeq}&type=html`;
-                    try {
-                        const rawBylHtml = await fetchViaProxy(bylHtmlUrl, signal);
-                        
-                        const parser = new DOMParser();
-                        const htmlDoc = parser.parseFromString(rawBylHtml, "text/html");
-                        const text = htmlDoc.body.textContent || "";
-                        
-                        const spaceStrippedBylText = text.replace(/\s+/g, "");
-                        if (spaceStrippedBylText.includes(spaceStrippedKeyword)) {
-                            const lines = text.split('\n');
-                            const matchedBylLines = [];
-                            const seenLines = new Set();
-                            
-                            lines.forEach((line, lineIdx) => {
-                                const cl = line.replace(/\s+/g, " ").trim();
-                                const strippedCl = cl.replace(/\s+/g, "");
-                                
-                                if (strippedCl.includes(spaceStrippedKeyword) && cl.length > 1) {
-                                    let foundDept = "확인실패";
+                    let foundInByl = false;
+                    let xlsResults = [];
+                    const matchedBylLines = [];
+                    
+                    // 1단계: Inline XML content scan (if present)
+                    const spaceStrippedBylContent = item.bylContent.replace(/\s+/g, "");
+                    if (spaceStrippedBylContent && spaceStrippedBylContent.includes(spaceStrippedKeyword)) {
+                        const textBc = item.bylContent.replace(/<[^>]+>/g, "");
+                        const textBcStripped = textBc.replace(/\s+/g, "");
+                        if (textBcStripped.includes(spaceStrippedKeyword)) {
+                            foundInByl = true;
+                            const seenLinesBc = new Set();
+                            const linesBc = textBc.split('\n');
+                            linesBc.forEach((line, lineIdx) => {
+                                const clBc = line.replace(/\s+/g, " ").trim();
+                                const clBcStripped = clBc.replace(/\s+/g, "");
+                                if (clBcStripped.includes(spaceStrippedKeyword) && clBc.length > 1) {
+                                    let foundDeptBc = "확인실패";
                                     for (let lookBack = lineIdx; lookBack >= 0; lookBack--) {
-                                        const backLine = lines[lookBack].trim();
+                                        const backLine = linesBc[lookBack].trim();
                                         const deptExt = extractValidDeptName(backLine);
                                         if (deptExt && isValidDeptName(deptExt)) {
-                                            foundDept = deptExt;
+                                            foundDeptBc = deptExt;
                                             break;
                                         }
                                     }
-                                    if (!seenLines.has(cl)) {
-                                        matchedBylLines.push([foundDept, cl]);
-                                        seenLines.add(cl);
+                                    if (!seenLinesBc.has(clBc)) {
+                                        matchedBylLines.push([foundDeptBc, clBc]);
+                                        seenLinesBc.add(clBc);
                                     }
                                 }
                             });
                             
-                            if (matchedBylLines.length > 0) {
+                            if (foundInByl && matchedBylLines.length > 0) {
                                 foundCount++;
-                                writeLog(`\n🎯 [첨부 별표 내부 분장사무 발견! -> 별표 일련번호 #${bylSeq}]`, "success");
+                                writeLog(`\n🎯 [첨부 별표 내부 분장사무 발견! (인라인) -> ${item.bylName}]`, "success");
                                 writeLog(`   📜 근거법령: ${lName}`);
                                 writeLog("------------------------------------------------------------------------------------------", "normal");
-                                
                                 matchedBylLines.forEach(([dept, matchLine]) => {
                                     writeLogTagged([["   ▶ 소관부서: ", "normal"], [`[${dept}]`, "dept"]]);
                                     writeLog(`      - 분장사무: ${matchLine}`, "office");
-                                    
                                     if (!finalSummary[orgKey]) finalSummary[orgKey] = [];
                                     finalSummary[orgKey].push([lName, dept, matchLine, isOrgLaw, mst]);
                                 });
                                 writeLog("------------------------------------------------------------------------------------------", "normal");
+                                continue;
                             }
                         }
-                    } catch (eByl) {
-                        console.error(`별표 #${bylSeq} 파싱 실패:`, eByl);
+                    }
+                    
+                    // 2단계: 이진 파일 다운로드 및 직접 파싱 스캔
+                    if (item.binaryUrl) {
+                        try {
+                            const arrayBuffer = await fetchViaProxyArrayBuffer(item.binaryUrl, signal);
+                            if (arrayBuffer && arrayBuffer.byteLength > 500) {
+                                const bytes = new Uint8Array(arrayBuffer);
+                                
+                                // OLE File magic header check (D0 CF 11 E0 A1 B1 1A E1)
+                                const isOle = bytes[0] === 0xD0 && bytes[1] === 0xCF && bytes[2] === 0x11 && bytes[3] === 0xE0 &&
+                                              bytes[4] === 0xA1 && bytes[5] === 0xB1 && bytes[6] === 0x1A && bytes[7] === 0xE1;
+                                
+                                let isHwp = false;
+                                if (isOle && typeof CFB !== "undefined") {
+                                    try {
+                                        const cfb = CFB.read(bytes, { type: "array" });
+                                        isHwp = cfb.FileIndex.some(file => file.name.includes("FileHeader"));
+                                    } catch (e) {}
+                                }
+                                
+                                // ZIP File magic header check (PK...)
+                                const isZip = bytes[0] === 0x50 && bytes[1] === 0x4B && bytes[2] === 0x03 && bytes[3] === 0x04;
+                                let isHwpx = false;
+                                if (isZip && typeof JSZip !== "undefined") {
+                                    try {
+                                        const zip = await JSZip.loadAsync(arrayBuffer);
+                                        isHwpx = Object.keys(zip.files).some(name => name.includes("Contents/section"));
+                                    } catch (e) {}
+                                }
+                                
+                                if (isOle && !isHwp) {
+                                    // Try XLS Excel parsing
+                                    try {
+                                        const r = await parseExcelWithDept(arrayBuffer, keyword);
+                                        if (r && r.length > 0) {
+                                            foundInByl = true;
+                                            xlsResults = r;
+                                        }
+                                    } catch (e) {}
+                                }
+                                
+                                if (!foundInByl) {
+                                    if (isHwp) {
+                                        const text = parseHwpText(arrayBuffer);
+                                        const searchRes = scanTextForBylawMatches(text, keyword);
+                                        if (searchRes && searchRes.length > 0) {
+                                            foundInByl = true;
+                                            matchedBylLines.push(...searchRes);
+                                        }
+                                    } else if (isZip && isHwpx) {
+                                        const text = await parseHwpxText(arrayBuffer);
+                                        const searchRes = scanTextForBylawMatches(text, keyword);
+                                        if (searchRes && searchRes.length > 0) {
+                                            foundInByl = true;
+                                            matchedBylLines.push(...searchRes);
+                                        }
+                                    } else if (isZip) {
+                                        // Try XLSX Excel parsing
+                                        try {
+                                            const r = await parseExcelWithDept(arrayBuffer, keyword);
+                                            if (r && r.length > 0) {
+                                                foundInByl = true;
+                                                xlsResults = r;
+                                            }
+                                        } catch (e) {}
+                                    } else {
+                                        // Fallback raw binary text scan
+                                        const text = parseRawBinaryText(bytes);
+                                        const searchRes = scanTextForBylawMatches(text, keyword);
+                                        if (searchRes && searchRes.length > 0) {
+                                            foundInByl = true;
+                                            matchedBylLines.push(...searchRes);
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (eBin) {
+                            console.warn("이진 파일 다운로드/파싱 실패:", item.binaryUrl, eBin);
+                        }
+                    }
+                    
+                    // 3단계: HTML 뷰어 간접 스캔 폴백
+                    if (!foundInByl && item.htmlUrl) {
+                        try {
+                            const rawBylHtml = await fetchViaProxy(item.htmlUrl, signal);
+                            const parser = new DOMParser();
+                            const htmlDoc = parser.parseFromString(rawBylHtml, "text/html");
+                            const text = htmlDoc.body.textContent || "";
+                            
+                            const searchRes = scanTextForBylawMatches(text, keyword);
+                            if (searchRes && searchRes.length > 0) {
+                                foundInByl = true;
+                                matchedBylLines.push(...searchRes);
+                            }
+                        } catch (eHtml) {
+                            console.error("별표 HTML 뷰어 스캔 실패:", item.htmlUrl, eHtml);
+                        }
+                    }
+                    
+                    // 매칭 결과 기록 및 로그 출력
+                    if (foundInByl) {
+                        foundCount++;
+                        writeLog(`\n🎯 [첨부 별표 내부 분장사무 발견! -> ${item.bylName}]`, "success");
+                        writeLog(`   📜 근거법령: ${lName}`);
+                        writeLog("------------------------------------------------------------------------------------------", "normal");
+                        
+                        if (xlsResults.length > 0) {
+                            xlsResults.forEach(([dept, matchLine]) => {
+                                writeLogTagged([["   ▶ 소관부서: ", "normal"], [`[${dept}]`, "dept"]]);
+                                writeLog(`      - 분장사무: ${matchLine}`, "office");
+                                if (!finalSummary[orgKey]) finalSummary[orgKey] = [];
+                                finalSummary[orgKey].push([lName, dept, matchLine, isOrgLaw, mst]);
+                            });
+                        } else {
+                            matchedBylLines.forEach(([dept, matchLine]) => {
+                                writeLogTagged([["   ▶ 소관부서: ", "normal"], [`[${dept}]`, "dept"]]);
+                                writeLog(`      - 분장사무: ${matchLine}`, "office");
+                                if (!finalSummary[orgKey]) finalSummary[orgKey] = [];
+                                finalSummary[orgKey].push([lName, dept, matchLine, isOrgLaw, mst]);
+                            });
+                        }
+                        writeLog("------------------------------------------------------------------------------------------", "normal");
                     }
                 }
             } catch (e) {
@@ -977,7 +1598,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
         }
         latestResults = null;
     } else {
-        writeLog(`🎉 스캔 완료! 총 ${foundCount}개 조직법령에서 '${keyword}' 분석을 완료했습니다.`, "success");
+        writeLog(`🎉 스캔 완료! 총 {foundCount}개 조직법령에서 '${keyword}' 분석을 완료했습니다.`, "success");
         
         const cleanedSummary = {};
         const targetKeys = isCentral ? targetRegions : (mainRegion === "전국 광역단체 전체" ? Object.keys(REGION_MAP) : [mainRegion]);
@@ -1347,6 +1968,7 @@ function highlightActiveMatch() {
     labelSearchStatus.textContent = `${currentSearchIndex + 1}/${currentSearchMatches.length}`;
 }
 
+// Fixed navigateSearchResult naming/navigation to prevent scope collision
 function navigateSearchResult(direction) {
     if (currentSearchMatches.length === 0) return;
     
