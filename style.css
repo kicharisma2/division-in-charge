@@ -393,9 +393,9 @@ body.dark-mode .form-input:focus {
     justify-content: center;
     gap: 6px;
     padding: 0 16px;
-    height: 38px; /* High premium look */
+    height: 32px; /* Matches dropdown and input heights for clean horizontal alignment */
     font-family: inherit;
-    font-size: 13.5px;
+    font-size: 12.5px; /* Slightly smaller font size to fit neatly */
     font-weight: 700;
     border: none;
     border-radius: var(--radius-sm);
@@ -404,11 +404,11 @@ body.dark-mode .form-input:focus {
 }
 
 #btnSearchOrdin, #btnSearchJeongyeol {
-    width: 165px;
+    width: 145px; /* Reduced width for a more compact and tidy button group */
 }
 
 #btnStop {
-    width: 90px;
+    width: 70px; /* Reduced width for the stop button */
 }
 
 .btn-primary {

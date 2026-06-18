@@ -175,23 +175,26 @@ btnClearLog.addEventListener("click", () => {
 // Initialize on load
 initDropdowns();
 
+let lastSuccessfulProxyIdx = 0;
+
 // Fetch helper with proxy fallback, content validation, and timeout support
 async function fetchViaProxy(url, signal) {
     let lastError = null;
     const proxies = [
+        { name: "corsproxy", url: u => `https://corsproxy.io/?${encodeURIComponent(u)}` },
         { name: "allorigins-raw", url: u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}` },
-        { name: "allorigins-json", url: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}` },
-        { name: "corsproxy", url: u => `https://corsproxy.io/?${encodeURIComponent(u)}` }
+        { name: "allorigins-json", url: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}` }
     ];
     
-    for (let i = 0; i < proxies.length; i++) {
+    for (let attempt = 0; attempt < proxies.length; attempt++) {
+        const i = (lastSuccessfulProxyIdx + attempt) % proxies.length;
         if (signal && signal.aborted) {
             throw new DOMException("Aborted", "AbortError");
         }
         const proxyUrl = proxies[i].url(url);
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for slow proxy networks
+            const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout (fail fast)
             
             if (signal) {
                 signal.addEventListener("abort", () => controller.abort());
@@ -230,6 +233,8 @@ async function fetchViaProxy(url, signal) {
                     throw new Error("Invalid HTML content returned from proxy");
                 }
             }
+            
+            lastSuccessfulProxyIdx = i;
             return text;
         } catch (e) {
             console.warn(`Proxy ${proxies[i].name} failed: ${url}`, e);
@@ -243,19 +248,20 @@ async function fetchViaProxy(url, signal) {
 async function fetchViaProxyArrayBuffer(url, signal) {
     let lastError = null;
     const proxies = [
+        { name: "corsproxy", url: u => `https://corsproxy.io/?${encodeURIComponent(u)}` },
         { name: "allorigins-raw", url: u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}` },
-        { name: "allorigins-json", url: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}` },
-        { name: "corsproxy", url: u => `https://corsproxy.io/?${encodeURIComponent(u)}` }
+        { name: "allorigins-json", url: u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}` }
     ];
     
-    for (let i = 0; i < proxies.length; i++) {
+    for (let attempt = 0; attempt < proxies.length; attempt++) {
+        const i = (lastSuccessfulProxyIdx + attempt) % proxies.length;
         if (signal && signal.aborted) {
             throw new DOMException("Aborted", "AbortError");
         }
         const proxyUrl = proxies[i].url(url);
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for slow proxy networks
+            const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for binary downloads
             
             if (signal) {
                 signal.addEventListener("abort", () => controller.abort());
@@ -307,6 +313,8 @@ async function fetchViaProxyArrayBuffer(url, signal) {
                     throw new Error("Received HTML error/redirect page instead of binary file");
                 }
             }
+            
+            lastSuccessfulProxyIdx = i;
             return arrayBuffer;
         } catch (e) {
             console.warn(`Proxy ${proxies[i].name} failed: ${url}`, e);
@@ -848,23 +856,35 @@ async function querySearchList(target, query, signal) {
                 const idAttr = match[2];
                 const itemBody = match[3];
                 
-                const tagIdMatch = itemBody.match(/<(?:행정규칙일련번호|자치법규일련번호|법령일련번호)>(\d+)<\/(?:행정규칙일련번호|자치법규일련번호|법령일련번호)>/);
-                const mst = tagIdMatch ? tagIdMatch[1] : idAttr;
-                
-                let name = "";
-                const nameCdataMatch = itemBody.match(/<(?:법령명|자치법규명|행정규칙명)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:법령명|자치법규명|행정규칙명)>/);
-                if (nameCdataMatch) {
-                    name = (nameCdataMatch[1] || nameCdataMatch[2] || "").trim();
+                // 1. Extract MST or ID using the URL parameter regex like Python (robust against tag encoding corruption)
+                const mstMatch = itemBody.match(/(?:MST|ID|ordinSeq|admrulSeq|seq)=(\d+)/i);
+                let mst = mstMatch ? mstMatch[1] : null;
+                if (!mst) {
+                    const tagIdMatch = itemBody.match(/<(?:행정규칙일련번호|자치법규일련번호|법령일련번호)>(\d+)<\/(?:행정규칙일련번호|자치법규일련번호|법령일련번호)>/i);
+                    mst = tagIdMatch ? tagIdMatch[1] : idAttr;
                 }
                 
-                let org = "";
-                const orgMatch = itemBody.match(/<(?:소관부처|소관기관|소관지자체|지자체기관명)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:소관부처|소관기관|소관지자체|지자체기관명)>/);
-                if (orgMatch) {
-                    org = (orgMatch[1] || orgMatch[2] || "").trim();
+                // 2. Extract name using CDATA regex like Python
+                let name = "";
+                const cdataMatches = [...itemBody.matchAll(/<!\[CDATA\[([\s\S]*?)\]\]>/g)];
+                if (cdataMatches.length > 0) {
+                    name = cdataMatches[0][1].trim();
                 } else {
-                    const regionRegex = />([가-힣]+(?:광역시|특별시|특별자치시|도|특별자치도)(?:\s*[가-힣]+(?:구|군|시))?)</;
-                    const fallbackOrgMatch = itemBody.match(regionRegex);
-                    if (fallbackOrgMatch) org = fallbackOrgMatch[1].trim();
+                    const nameCdataMatch = itemBody.match(/<(?:법령명|자치법규명|행정규칙명)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:법령명|자치법규명|행정규칙명)>/i);
+                    if (nameCdataMatch) {
+                        name = (nameCdataMatch[1] || nameCdataMatch[2] || "").trim();
+                    }
+                }
+                
+                // 3. Extract org using region regex like Python
+                let org = "";
+                const regionRegex = />([가-힣]+(?:광역시|특별시|특별자치시|도|특별자치도)(?:\s*[가-힣]+(?:구|군|시))?)</;
+                const fallbackOrgMatch = itemBody.match(regionRegex);
+                if (fallbackOrgMatch) {
+                    org = fallbackOrgMatch[1].trim();
+                } else {
+                    const orgMatch = itemBody.match(/<(?:소관부처|소관기관|소관지자체|지자체기관명)>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/(?:소관부처|소관기관|소관지자체|지자체기관명)>/i);
+                    if (orgMatch) org = (orgMatch[1] || orgMatch[2] || "").trim();
                 }
                 
                 if (mst && name) {
@@ -1670,7 +1690,7 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
         }
         latestResults = null;
     } else {
-        writeLog(`🎉 스캔 완료! 총 {foundCount}개 조직법령에서 '${keyword}' 분석을 완료했습니다.`, "success");
+        writeLog(`🎉 스캔 완료! 총 ${foundCount}개 조직법령에서 '${keyword}' 분석을 완료했습니다.`, "success");
         
         const cleanedSummary = {};
         const targetKeys = isCentral ? targetRegions : (mainRegion === "전국 광역단체 전체" ? Object.keys(REGION_MAP) : [mainRegion]);
