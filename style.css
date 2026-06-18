@@ -1147,6 +1147,26 @@ body.dark-mode .report-law-badge {
     margin-top: 6px;
 }
 
+/* Radio buttons row division styling */
+.radio-row {
+    width: 100%;
+    border-bottom: 1.5px dashed var(--border-color);
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.radio-section-label {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 /* Responsive adaptation for Mobile Screen */
 @media (max-width: 768px) {
     .header-title {
@@ -1167,6 +1187,29 @@ body.dark-mode .report-law-badge {
         padding: 10px 14px;
         gap: 8px;
     }
+    
+    .radio-row {
+        flex-direction: row !important;
+        justify-content: flex-start;
+        padding-bottom: 6px !important;
+        margin-bottom: 2px !important;
+        gap: 8px !important;
+        border-bottom: 1px dashed var(--border-color) !important;
+    }
+    
+    .radio-section-label {
+        font-size: 11.5px;
+        white-space: nowrap;
+    }
+    
+    .radio-group {
+        gap: 10px !important;
+    }
+    
+    .radio-label {
+        font-size: 12px !important;
+    }
+
     .selectors-row {
         flex-direction: row !important;
         align-items: flex-start;

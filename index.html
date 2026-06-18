@@ -11,7 +11,7 @@
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Custom CSS Styling -->
-    <link rel="stylesheet" href="style.css?v=5.0">
+    <link rel="stylesheet" href="style.css?v=6.0">
     <!-- JSZip for client-side ZIP/HWPX reading -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- Pako for client-side Deflate/HWP decompression -->
@@ -37,7 +37,8 @@
         <!-- Top Horizontal Control Panel -->
         <section class="top-control-panel">
             <!-- Row 1: Radio Buttons -->
-            <div class="control-row">
+            <div class="control-row radio-row">
+                <span class="radio-section-label"><i class="fa-solid fa-sliders" style="color: var(--primary-color);"></i> 검색 범위:</span>
                 <div class="radio-group">
                     <label class="radio-label">
                         <input type="radio" name="govtType" value="central" id="radioCentral">
@@ -215,6 +216,6 @@
     </div>
 
     <!-- Application Script -->
-    <script src="app.js?v=5.0"></script>
+    <script src="app.js?v=6.0"></script>
 </body>
 </html>
