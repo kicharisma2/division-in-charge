@@ -166,7 +166,7 @@ btnClearLog.addEventListener("click", () => {
         <div class="empty-welcome">
             <i class="fa-solid fa-arrow-pointer wave-animation"></i>
             <h3>데이터 대기 중...</h3>
-            <p>사무 검색어를 입력하고 정밀 추적을 시작해 주세요.</p>
+            <p>사무 검색어를 입력하고 검색을 시작해 주세요.</p>
         </div>
     `;
     resetResultSearch();
@@ -239,6 +239,9 @@ async function fetchViaProxy(url, signal) {
         } catch (e) {
             console.warn(`Proxy ${proxies[i].name} failed: ${url}`, e);
             lastError = e;
+            if (signal && signal.aborted) {
+                throw new DOMException("Aborted", "AbortError");
+            }
         }
     }
     throw new Error(`모든 CORS 프록시 서버 호출에 실패했습니다. (최종 에러: ${lastError?.message})`);
@@ -319,6 +322,9 @@ async function fetchViaProxyArrayBuffer(url, signal) {
         } catch (e) {
             console.warn(`Proxy ${proxies[i].name} failed: ${url}`, e);
             lastError = e;
+            if (signal && signal.aborted) {
+                throw new DOMException("Aborted", "AbortError");
+            }
         }
     }
     throw new Error(`모든 CORS 프록시 서버 호출에 실패했습니다. (최종 에러: ${lastError?.message})`);
@@ -919,23 +925,26 @@ inputKeyword.addEventListener("keydown", (e) => {
 function stopTracking() {
     if (isSearching && abortController) {
         abortController.abort();
-        writeLog("\n🛑 사용자에 의해 추적 작업이 중단되었습니다.", "error");
+        writeLog("\n🛑 사용자에 의해 검색 작업이 중단되었습니다.", "error");
         setSearchingState(false);
     }
 }
 
-function setSearchingState(state) {
+function setSearchingState(state, mode = "ordin") {
     isSearching = state;
     btnSearchOrdin.disabled = state;
     btnSearchJeongyeol.disabled = state;
     btnStop.disabled = !state;
     
     if (state) {
-        btnSearchOrdin.innerHTML = '<i class="fa-solid fa-spinner fa-spin-custom"></i> 가동 중...';
-        btnSearchJeongyeol.disabled = true;
+        if (mode === "jeongyeol") {
+            btnSearchJeongyeol.innerHTML = '<i class="fa-solid fa-spinner fa-spin-custom"></i> 가동 중...';
+        } else {
+            btnSearchOrdin.innerHTML = '<i class="fa-solid fa-spinner fa-spin-custom"></i> 가동 중...';
+        }
     } else {
         btnSearchOrdin.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> 분장사무 검색';
-        btnSearchJeongyeol.disabled = false;
+        btnSearchJeongyeol.innerHTML = '<i class="fa-solid fa-signature"></i> 사무전결 검색';
         
         if (latestResults && Object.keys(latestResults.summary).length > 0) {
             btnDownloadExcel.disabled = false;
@@ -959,7 +968,7 @@ async function startTracking(mode) {
     logOutput.innerHTML = "";
     reportOutput.innerHTML = "";
     reportSummaryCards.style.display = "none";
-    setSearchingState(true);
+    setSearchingState(true, mode);
     
     const mainRegion = selectMain.value;
     const subRegion = radioCentral.checked ? "" : selectSub.value;
@@ -971,9 +980,9 @@ async function startTracking(mode) {
         await executeSearchLogic(keyword, mainRegion, subRegion, mode, signal);
     } catch (err) {
         if (err.name === 'AbortError') {
-            writeLog("\n🛑 추적 엔진이 안전하게 중단되었습니다.", "error");
+            writeLog("\n🛑 검색 엔진이 안전하게 중단되었습니다.", "error");
         } else {
-            writeLog(`\n❌ 치명적 추적 오류 발생: ${err.message}`, "error");
+            writeLog(`\n❌ 치명적 검색 오류 발생: ${err.message}`, "error");
         }
         console.error(err);
     } finally {
@@ -1126,7 +1135,23 @@ async function executeSearchLogic(keyword, mainRegion, subRegion, mode, signal) 
             continue;
         }
         
-        for (const [mst, ldata] of Object.entries(targetLaws)) {
+        // [초강력 최적화] 1순위 조직 법령이 포함되어 있다면 불필요한 2순위 일반 법령 상세 조회를 생략하여 웹 성능을 극대화합니다.
+        const targetLawsEntries = Object.entries(targetLaws);
+        let lawsToScan = targetLawsEntries;
+        if (mode === "ordin") {
+            const hasOrgLawInPool = targetLawsEntries.some(([_, ldata]) => {
+                const lName = ldata.name;
+                return lName.includes("행정기구") || lName.includes("직제") || lName.includes("조직") || lName.includes("정원");
+            });
+            if (hasOrgLawInPool) {
+                lawsToScan = targetLawsEntries.filter(([_, ldata]) => {
+                    const lName = ldata.name;
+                    return lName.includes("행정기구") || lName.includes("직제") || lName.includes("조직") || lName.includes("정원");
+                });
+            }
+        }
+
+        for (const [mst, ldata] of lawsToScan) {
             if (signal.aborted) throw new DOMException("Aborted", "AbortError");
             
             const lName = ldata.name;
